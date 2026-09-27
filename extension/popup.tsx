@@ -1,7 +1,35 @@
 // Toolbar popup: opens the fitting room on the current tab, or sends a new user to settings.
 
+import { useClerk, useUser } from "@clerk/chrome-extension"
 import { useEffect, useState } from "react"
+import { getAuthConfig, isAuthConfigured } from "./lib/auth-config"
+import { ExtensionAuthProvider, useExtensionAuthStatus } from "./lib/auth-provider"
 import "./popup.css"
+
+// Auth UI mounts only when public Clerk/Convex config is present; otherwise the popup
+// is exactly the Decart-key UI it has always been.
+const authEnabled = isAuthConfigured()
+
+/** Minimal Clerk state: loading / signed out (with web sign-in link) / signed in + Convex. */
+function AuthSection() {
+  const status = useExtensionAuthStatus()
+  const { user } = useUser()
+  const { signOut } = useClerk()
+  if (status.state === "loading") return <p className="popup-hint">Checking Fitcheck sign-in…</p>
+  if (status.state === "signed-out") {
+    const syncHost = getAuthConfig().clerkSyncHost
+    const signInUrl = syncHost ? `${syncHost.replace(/\/$/, "")}/sign-in` : null
+    return <>
+      <p className="popup-hint">Not signed in. Sign in on the Fitcheck web app and the extension picks it up automatically.</p>
+      {signInUrl && <button className="popup-action secondary" onClick={() => void chrome.tabs.create({ url: signInUrl })}><span>Sign in on Fitcheck</span></button>}
+    </>
+  }
+  const identity = user?.primaryEmailAddress?.emailAddress || user?.username || user?.firstName || "Signed in"
+  return <>
+    <p className="popup-hint">Signed in as {identity} · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</p>
+    <button className="popup-action secondary" onClick={() => void signOut()}><span>Sign out</span></button>
+  </>
+}
 
 /** Asks the tab's content script to open the room, injecting the script first if the tab
  *  was open before the extension was installed or reloaded. */
@@ -28,7 +56,7 @@ async function openFittingRoom() {
   }
 }
 
-export default function Popup() {
+function Popup() {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [hasKey, setHasKey] = useState<boolean | null>(null)
@@ -57,5 +85,10 @@ export default function Popup() {
     </button>
     <p className="popup-hint">{hasKey ? "Key saved · open a shopping page, then drag any product photo in." : "One-time setup: paste your key from platform.decart.ai."}</p>
     {error && <p role="alert" className="popup-error">{error}</p>}
+    {authEnabled && <AuthSection />}
   </main>
+}
+
+export default function PopupRoot() {
+  return authEnabled ? <ExtensionAuthProvider><Popup /></ExtensionAuthProvider> : <Popup />
 }

@@ -10,6 +10,8 @@
 
 import { createDecartClient, models } from "../vendor/decart-sdk.mjs"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { isAuthConfigured } from "../lib/auth-config"
+import { ExtensionAuthProvider, useExtensionAuthStatus } from "../lib/auth-provider"
 import { nameFromFile, parseDrop, type Incoming } from "../lib/drop"
 import { buildPrompt, cleanName, normalizeImage } from "../lib/garment"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
@@ -28,6 +30,18 @@ const SETTLE_MS = 900 // Decart needs a moment after set() before frames show th
 const HOLD_MS = 900 // how long the user must stay in the outline before framing completes
 // The same page doubles as a full-tab "allow camera" screen when opened with ?grant (see GrantPage).
 const isGrantPage = new URLSearchParams(location.search).has("grant")
+
+// Auth state mounts only when public Clerk/Convex config is present; otherwise the room
+// is exactly the Decart-key UI it has always been.
+const authEnabled = isAuthConfigured()
+
+/** One-line Clerk + Convex state for the room. Rendered inside the provider only. */
+function RoomAuthBadge() {
+  const status = useExtensionAuthStatus()
+  if (status.state === "loading") return <small>Checking Fitcheck sign-in…</small>
+  if (status.state === "signed-out") return <small>Not signed in — the fitting room still works with your Decart key.</small>
+  return <small>Signed in · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</small>
+}
 
 /** Sends a request to background.ts, which holds the API key and fetches images. */
 async function background<T>(type: string, fields: Record<string, unknown> = {}): Promise<T> {
@@ -510,6 +524,7 @@ function Room() {
           ? <button className="primary" onClick={() => chrome.runtime.openOptionsPage()}>Add your Decart API key</button>
           : <button className="primary" onClick={() => void start()} disabled={hasKey === null}>Enable camera</button>}
         <small>{hasKey === false ? "Stored only in this browser. Never sent anywhere except Decart." : "Video streams to Decart only while this window is open."}</small>
+        {authEnabled && <RoomAuthBadge />}
       </div>}
 
       {phase === "starting" && <div className="intro loading"><div className="spinner" /><span>{visionReady ? "Opening camera…" : "Opening camera and loading the body guide…"}</span></div>}
@@ -549,5 +564,6 @@ function Room() {
 }
 
 export default function RoomPage() {
-  return isGrantPage ? <GrantPage /> : <Room />
+  const page = isGrantPage ? <GrantPage /> : <Room />
+  return authEnabled ? <ExtensionAuthProvider>{page}</ExtensionAuthProvider> : page
 }

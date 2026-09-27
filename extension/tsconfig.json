@@ -2,7 +2,7 @@
   "extends": "plasmo/templates/tsconfig.base",
   "compilerOptions": {
     "baseUrl": ".",
-    "types": ["chrome", "react", "react-dom"],
+    "types": ["chrome", "react", "react-dom", "node"],
     "paths": { "~*": ["./*"] }
   },
   "include": [".plasmo/index.d.ts", "**/*.ts", "**/*.tsx"]

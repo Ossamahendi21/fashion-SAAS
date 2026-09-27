@@ -16,8 +16,10 @@
     "copy-vision:dev": "node scripts/copy-vision.mjs build/chrome-mv3-dev"
   },
   "dependencies": {
+    "@clerk/chrome-extension": "^3.1.87",
     "@decartai/sdk": "^0.2.2",
     "@mediapipe/tasks-vision": "^1.0.1",
+    "convex": "^1.46.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -31,6 +33,7 @@
   },
   "manifest": {
     "permissions": [
+      "cookies",
       "storage",
       "scripting"
     ],
