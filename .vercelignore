@@ -1,0 +1,15 @@
+.git
+.next
+node_modules
+.convex
+.eve
+.output
+.codex
+.pnpm-store
+.env*
+!.env.example
+Claude outputs
+artifacts
+verification
+*.tsbuildinfo
+coverage

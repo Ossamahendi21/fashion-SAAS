@@ -1,0 +1,11 @@
+node_modules
+.next
+convex/_generated
+pnpm-lock.yaml
+.claude
+docs/reference
+.pnpm-store
+Claude outputs
+.eve
+.output
+.convex
