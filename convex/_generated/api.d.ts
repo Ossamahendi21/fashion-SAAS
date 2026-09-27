@@ -25,6 +25,8 @@ import type * as jobs from "../jobs.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_env from "../lib/env.js";
 import type * as lib_errors from "../lib/errors.js";
+import type * as liveMirror from "../liveMirror.js";
+import type * as liveMirror_decart from "../liveMirror/decart.js";
 import type * as model_admin from "../model/admin.js";
 import type * as model_avatars from "../model/avatars.js";
 import type * as model_credits from "../model/credits.js";
@@ -77,6 +79,8 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/env": typeof lib_env;
   "lib/errors": typeof lib_errors;
+  liveMirror: typeof liveMirror;
+  "liveMirror/decart": typeof liveMirror_decart;
   "model/admin": typeof model_admin;
   "model/avatars": typeof model_avatars;
   "model/credits": typeof model_credits;

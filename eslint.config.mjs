@@ -18,6 +18,10 @@ const eslintConfig = defineConfig([
     ".eve/**",
     ".output/**",
     ".convex/**",
+    // OpenWear is a separate Plasmo/React project with its own package.json and
+    // tsconfig. This config applies Next.js rules (e.g. @next/next/no-img-element)
+    // that do not apply to it, and the extension has no ESLint config of its own yet.
+    "extension/**",
   ]),
 ]);
 

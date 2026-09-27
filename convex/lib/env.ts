@@ -6,6 +6,10 @@ export const SERVER_ENV_KEYS = [
   "AGENT_SERVICE_KEY",
   "SITE_URL",
   "MAX_DAILY_SPEND_USD",
+  /** Server-only Decart credential for Live Mirror token minting. Never expose via NEXT_PUBLIC_. */
+  "DECART_API_KEY",
+  /** Per-session Live Mirror safety cap in seconds (strictly validated; missing/invalid fails closed). */
+  "LIVE_MIRROR_SESSION_MAX_SECONDS",
   /** "1" enables the internal smoke-test functions in `convex/dev/smoke.ts`; unset everywhere but a scratch deployment. */
   "ALLOW_DEV_SMOKE",
 ] as const;
