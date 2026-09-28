@@ -1,11 +1,25 @@
 // Public auth configuration for the OpenWear extension.
 //
 // ONLY public values may live here: the Clerk publishable key (pk_*), the Sync Host
-// origin, and the Convex deployment URL. All three are already public in the Fitcheck
-// web bundle. NEVER add CLERK_SECRET_KEY, DECART_API_KEY, or AGENT_SERVICE_KEY.
+// value, the Fitcheck web app origin, and the Convex deployment URL. All are already
+// public in the Fitcheck web bundle. NEVER add CLERK_SECRET_KEY, DECART_API_KEY, or AGENT_SERVICE_KEY.
 //
-// Values arrive via Plasmo build-time env (process.env.PLASMO_PUBLIC_*). In tests they
-// are passed explicitly, so no browser or build is needed to validate this module.
+// Values arrive via Plasmo build-time env. Plasmo/Parcel only replaces DIRECT static
+// process.env.PLASMO_PUBLIC_* references, so the default env object below must spell
+// each variable out literally — never process.env[name] and never a passed-through
+// env.* object. In tests a custom env is injected explicitly, so no browser or build
+// is needed to validate this module.
+
+/**
+ * Build-time env with static references Plasmo can replace at compile time.
+ * This is the ONLY place process.env may be read in client auth code.
+ */
+const BUILD_ENV: Record<string, string | undefined> = {
+  PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  PLASMO_PUBLIC_CONVEX_URL: process.env.PLASMO_PUBLIC_CONVEX_URL,
+  PLASMO_PUBLIC_CLERK_SYNC_HOST: process.env.PLASMO_PUBLIC_CLERK_SYNC_HOST,
+  PLASMO_PUBLIC_FITCHECK_APP_URL: process.env.PLASMO_PUBLIC_FITCHECK_APP_URL,
+}
 
 export type ExtensionAuthConfig = {
   /** Clerk publishable key for the Chrome Extension instance (pk_test_* / pk_live_*). */
@@ -14,6 +28,8 @@ export type ExtensionAuthConfig = {
   clerkSyncHost: string | null
   /** Convex deployment URL (https://<name>.convex.cloud). */
   convexUrl: string
+  /** Fitcheck web app origin used for user-facing links (sign-in). Separate from Sync Host. */
+  fitcheckAppUrl: string
 }
 
 export type ExtensionAuthStatus =
@@ -22,7 +38,7 @@ export type ExtensionAuthStatus =
   | { state: "signed-in"; convexAuthenticated: boolean }
 
 /** Fails with a clear, actionable message naming the exact missing variable. */
-export function getAuthConfig(env: Record<string, string | undefined> = process.env): ExtensionAuthConfig {
+export function getAuthConfig(env: Record<string, string | undefined> = BUILD_ENV): ExtensionAuthConfig {
   const clerkPublishableKey = (env.PLASMO_PUBLIC_CLERK_PUBLISHABLE_KEY || "").trim()
   if (!clerkPublishableKey) {
     throw new Error(
@@ -41,13 +57,35 @@ export function getAuthConfig(env: Record<string, string | undefined> = process.
     )
   }
   // Sync Host is optional: without it the extension authenticates standalone instead of
-  // syncing the web app session. Production should always set it.
+  // syncing the web app session. Production should always set it. It identifies the sync
+  // counterpart to Clerk — it is NOT the user-facing web app URL (see fitcheckAppUrl).
   const clerkSyncHost = (env.PLASMO_PUBLIC_CLERK_SYNC_HOST || "").trim() || null
-  return { clerkPublishableKey, clerkSyncHost, convexUrl }
+  // The user-facing Fitcheck origin. Required whenever auth is enabled: signed-out UI
+  // links here, and building it from the Sync Host value is wrong (dev Sync Host is
+  // bare http://localhost, which serves nothing — hence ERR_CONNECTION_REFUSED).
+  const fitcheckAppUrl = (env.PLASMO_PUBLIC_FITCHECK_APP_URL || "").trim().replace(/\/+$/, "")
+  let appOrigin: URL
+  try {
+    appOrigin = new URL(fitcheckAppUrl)
+  } catch {
+    throw new Error(
+      "PLASMO_PUBLIC_FITCHECK_APP_URL is not set or not a valid URL. Set it to the Fitcheck web app origin " +
+      "(http://localhost:3000 for development) in extension/.env.development (see extension/.env.example)."
+    )
+  }
+  if (!["http:", "https:"].includes(appOrigin.protocol)) {
+    throw new Error("PLASMO_PUBLIC_FITCHECK_APP_URL must be an http(s) URL.")
+  }
+  return { clerkPublishableKey, clerkSyncHost, convexUrl, fitcheckAppUrl: appOrigin.origin }
+}
+
+/** Web sign-in URL for signed-out UI. Single place so links never drift back to syncHost. */
+export function fitcheckSignInUrl(config: ExtensionAuthConfig): string {
+  return `${config.fitcheckAppUrl}/sign-in`
 }
 
 /** Whether the extension can mount Clerk auth. False = Decart-key path only, unchanged. */
-export function isAuthConfigured(env: Record<string, string | undefined> = process.env): boolean {
+export function isAuthConfigured(env: Record<string, string | undefined> = BUILD_ENV): boolean {
   try { getAuthConfig(env); return true } catch { return false }
 }
 

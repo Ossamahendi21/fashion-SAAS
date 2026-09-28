@@ -2,7 +2,7 @@
 
 import { useClerk, useUser } from "@clerk/chrome-extension"
 import { useEffect, useState } from "react"
-import { getAuthConfig, isAuthConfigured } from "./lib/auth-config"
+import { getAuthConfig, fitcheckSignInUrl, isAuthConfigured } from "./lib/auth-config"
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "./lib/auth-provider"
 import "./popup.css"
 
@@ -17,11 +17,9 @@ function AuthSection() {
   const { signOut } = useClerk()
   if (status.state === "loading") return <p className="popup-hint">Checking Fitcheck sign-in…</p>
   if (status.state === "signed-out") {
-    const syncHost = getAuthConfig().clerkSyncHost
-    const signInUrl = syncHost ? `${syncHost.replace(/\/$/, "")}/sign-in` : null
     return <>
       <p className="popup-hint">Not signed in. Sign in on the Fitcheck web app and the extension picks it up automatically.</p>
-      {signInUrl && <button className="popup-action secondary" onClick={() => void chrome.tabs.create({ url: signInUrl })}><span>Sign in on Fitcheck</span></button>}
+      <button className="popup-action secondary" onClick={() => void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })}><span>Sign in on Fitcheck</span></button>
     </>
   }
   const identity = user?.primaryEmailAddress?.emailAddress || user?.username || user?.firstName || "Signed in"

@@ -32,6 +32,7 @@
     "typescript": "^5.7.3"
   },
   "manifest": {
+    "key": "$CRX_PUBLIC_KEY",
     "permissions": [
       "cookies",
       "storage",
