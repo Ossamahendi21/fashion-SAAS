@@ -9,11 +9,22 @@
 //       Later garments reuse the same connection via set().
 
 import { createDecartClient, models } from "../vendor/decart-sdk.mjs"
-import { useCallback, useEffect, useRef, useState } from "react"
-import { isAuthConfigured } from "../lib/auth-config"
+import { useAction } from "convex/react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { fitcheckSignInUrl, getAuthConfig, isAuthConfigured, type ExtensionAuthStatus } from "../lib/auth-config"
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "../lib/auth-provider"
 import { nameFromFile, parseDrop, type Incoming } from "../lib/drop"
 import { buildPrompt, cleanName, normalizeImage } from "../lib/garment"
+import {
+  authorizeLiveMirror,
+  createLiveMirrorAuthorizer,
+  LiveMirrorError,
+  liveMirrorMessage,
+  resolveRealtimeModel,
+  type LegacyToken,
+  type LiveMirrorAuthorization
+} from "../lib/live-mirror"
+import { loadSessionPreferences, type SessionPreferences } from "../lib/settings"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
 import "./room.css"
 
@@ -21,10 +32,14 @@ type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
 type Phase = "idle" | "starting" | "framing" | "ready"
 type GarmentStatus = "reading" | "waiting" | "fitting" | "live" | "failed"
 type Garment = { id: number; name: string; preview: string; status: GarmentStatus }
-type Token = { apiKey: string; fastMode: boolean; sessionSeconds: number }
-type Notice = { message: string; action?: "settings" | "grant" | "restart" }
+type Token = LegacyToken
+type Notice = { message: string; action?: "settings" | "grant" | "restart" | "signin" }
+/** The id union the vendored SDK accepts; the server may only pick from this catalogue. */
+type RealtimeModelId = Parameters<typeof models.realtime>[0]
 
-const model = models.realtime("lucy-vton-latest")
+// Capture sizing only. The model actually connected to comes from the server authorization
+// (see connect()), so the browser never chooses which model bills the session.
+const capture = models.realtime("lucy-vton-latest")
 const SCAN_REVEAL_MS = 1300 // final top-to-bottom sweep that reveals the AI video
 const SETTLE_MS = 900 // Decart needs a moment after set() before frames show the new garment
 const HOLD_MS = 900 // how long the user must stay in the outline before framing completes
@@ -39,8 +54,13 @@ const authEnabled = isAuthConfigured()
 function RoomAuthBadge() {
   const status = useExtensionAuthStatus()
   if (status.state === "loading") return <small>Checking Fitcheck sign-in…</small>
-  if (status.state === "signed-out") return <small>Not signed in — the fitting room still works with your Decart key.</small>
+  if (status.state === "signed-out") return <small>Not signed in — the fitting room needs a Fitcheck account.</small>
   return <small>Signed in · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</small>
+}
+
+/** Opens the Fitcheck sign-in page on the web app, where the Clerk session actually lives. */
+function signInOnFitcheck() {
+  void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })
 }
 
 /** Sends a request to background.ts, which holds the API key and fetches images. */
@@ -52,6 +72,12 @@ async function background<T>(type: string, fields: Record<string, unknown> = {})
 
 /** Maps camera, key and network failures to a message plus the one action that fixes it. */
 function friendly(error: any): Notice {
+  // Secure authorization failures already carry safe copy; never rewrite or detail them.
+  if (error instanceof LiveMirrorError) {
+    return error.failure === "UNAUTHENTICATED"
+      ? { message: error.message, action: "signin" }
+      : { message: error.message, action: "restart" }
+  }
   const message = String(error?.message || error || "")
   if (message === "NO_KEY") return { message: "Add your Decart API key to start.", action: "settings" }
   if (message === "KEY_REJECTED" || error?.code === "INVALID_API_KEY") return { message: "Decart rejected your API key. Check it in settings.", action: "settings" }
@@ -77,7 +103,20 @@ function GrantPage() {
   </main>
 }
 
-function Room() {
+/**
+ * Bridges the auth hooks to Room. Kept separate so the room body itself never calls a hook
+ * conditionally: without configured auth there is no Clerk/Convex provider to call them against.
+ */
+function RoomWithAuth() {
+  const status = useExtensionAuthStatus()
+  const liveMirrorAction = useAction(authorizeLiveMirror)
+  return <Room authStatus={status} liveMirrorAction={liveMirrorAction} />
+}
+
+function Room({ authStatus, liveMirrorAction }: {
+  authStatus: ExtensionAuthStatus | null
+  liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
+}) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -92,6 +131,11 @@ function Room() {
   const [remaining, setRemaining] = useState(0)
   const [editingName, setEditingName] = useState(false)
   const [size, setSize] = useState({ width: 0, height: 0 })
+  const [preferences, setPreferences] = useState<SessionPreferences>({ sessionSeconds: 300, fastMode: false })
+  const preferencesRef = useRef(preferences)
+  preferencesRef.current = preferences
+  // Server authorization: one in-flight mint at a time, shared by concurrent starts.
+  const authorizer = useMemo(() => createLiveMirrorAuthorizer(), [])
 
   // Refs mirror state that the animation loop and async callbacks read without re-rendering.
   const stageRef = useRef<HTMLDivElement>(null)
@@ -146,11 +190,14 @@ function Room() {
     if (reason) setNotice(reason)
   }, [])
 
-  // Track the saved key, and stop the (billed) session when the tab is hidden or the room closes.
+  // Track the saved key and session preferences, and stop the (billed) session when the tab is
+  // hidden or the room closes. Preferences are read without the stored Decart key.
   useEffect(() => {
     background<{ hasKey: boolean }>("status").then(value => setHasKey(value.hasKey)).catch(() => setHasKey(false))
+    loadSessionPreferences().then(setPreferences).catch(() => {})
     const onStorage = (changes: Record<string, chrome.storage.StorageChange>) => {
       if (changes.apiKey) { setHasKey(!!String(changes.apiKey.newValue || "").trim()); setNotice(null) }
+      if (changes.sessionMinutes || changes.fastMode) void loadSessionPreferences().then(setPreferences).catch(() => {})
     }
     chrome.storage.onChanged.addListener(onStorage)
     const onHidden = () => { if (document.hidden && streamRef.current) stop({ message: "Paused while you were away.", action: "restart" }) }
@@ -194,13 +241,14 @@ function Room() {
   const start = useCallback(async () => {
     if (phaseRef.current !== "idle") return
     setNotice(null)
-    if (!hasKey) { setNotice({ message: "Add your Decart API key to start.", action: "settings" }); return }
+    // With auth configured, the server authorizer is mandatory, so a missing local key is fine.
+    if (!authEnabled && !hasKey) { setNotice({ message: "Add your Decart API key to start.", action: "settings" }); return }
     const session = ++sessionRef.current
     setPhase("starting")
     try {
-      const fps = typeof model.fps === "number" ? { ideal: model.fps } : model.fps
+      const fps = typeof capture.fps === "number" ? { ideal: capture.fps } : capture.fps
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: model.width }, height: { ideal: model.height }, ...(fps ? { frameRate: fps } : {}), facingMode: "user" },
+        video: { width: { ideal: capture.width }, height: { ideal: capture.height }, ...(fps ? { frameRate: fps } : {}), facingMode: "user" },
         audio: false
       })
       if (session !== sessionRef.current) { stream.getTracks().forEach(track => track.stop()); return }
@@ -222,15 +270,32 @@ function Room() {
     }
   }, [enterFraming, hasKey, markFramed, stop])
 
-  /** Opens the Decart realtime session with the first garment as its initial state. */
+  /**
+   * Opens the Decart realtime session with the first garment as its initial state.
+   * The token, the model and the session cap all come from the resolved authorization.
+   */
   const connect = useCallback(async (image: Blob, prompt: string, session: number) => {
-    const token = await background<Token>("token")
+    // Single-flight: concurrent garment drops share one authorization, so one token is minted.
+    const grant = await authorizer.acquire({
+      authEnabled,
+      status: authStatus,
+      authorize: liveMirrorAction,
+      legacyToken: () => background<Token>("token"),
+      localSessionSeconds: preferencesRef.current.sessionSeconds,
+      fastMode: preferencesRef.current.fastMode
+    })
     if (session !== sessionRef.current) throw Error("stopped")
-    const client = createDecartClient({ apiKey: token.apiKey, telemetry: false })
+    // Server-named model on the secure path. The SDK's id union is narrower than the string
+    // the server returns, so widen once here: the runtime catalogue still throws for any id
+    // Decart does not know, and resolveRealtimeModel turns that into a safe failure.
+    const model = grant.model
+      ? resolveRealtimeModel(grant.model, id => models.realtime(id as RealtimeModelId))
+      : models.realtime("lucy-vton-latest")
+    const client = createDecartClient({ apiKey: grant.token, telemetry: false })
     const realtime = await client.realtime.connect(streamRef.current!, {
       model,
       mirror: true, // desktop webcams rarely report facingMode, so mirror explicitly (Decart best practice)
-      ...(token.fastMode ? { speed: "fast" } : {}),
+      ...(grant.fastMode ? { speed: "fast" } : {}),
       initialState: { prompt: { text: prompt, enhance: true }, image },
       onRemoteStream: (remote: MediaStream) => {
         if (session !== sessionRef.current || !remoteRef.current) return
@@ -250,16 +315,16 @@ function Room() {
     realtime.on("error", (error: any) => { if (session === sessionRef.current) stop(friendly(error)) })
     connectionRef.current = realtime
     setConnection(realtime.getConnectionState?.() || "connected")
-    // Realtime video is billed per second, so enforce the session limit from settings.
+    // Realtime video is billed per second, so enforce the already-clamped session limit.
     const started = Date.now()
-    setRemaining(token.sessionSeconds)
+    setRemaining(grant.sessionSeconds)
     timerRef.current = setInterval(() => {
-      const left = Math.max(0, token.sessionSeconds - Math.floor((Date.now() - started) / 1000))
+      const left = Math.max(0, grant.sessionSeconds - Math.floor((Date.now() - started) / 1000))
       setRemaining(left)
       if (!left) stop({ message: "Session limit reached. Start again whenever you like.", action: "restart" })
     }, 1000)
     return realtime
-  }, [stop])
+  }, [authEnabled, authStatus, liveMirrorAction, stop])
 
   // ---------- Garment pipeline ----------
 
@@ -472,6 +537,7 @@ function Room() {
   const onNoticeAction = () => {
     if (notice?.action === "settings") chrome.runtime.openOptionsPage()
     if (notice?.action === "grant") window.open(chrome.runtime.getURL("tabs/room.html?grant=1"), "_blank")
+    if (notice?.action === "signin") void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })
     if (notice?.action === "restart") { setNotice(null); void start() }
   }
 
@@ -520,10 +586,17 @@ function Room() {
           <li><b>2</b>Line yourself up with the outline</li>
           <li><b>3</b>Drag any product photo in here</li>
         </ol>
-        {hasKey === false
-          ? <button className="primary" onClick={() => chrome.runtime.openOptionsPage()}>Add your Decart API key</button>
-          : <button className="primary" onClick={() => void start()} disabled={hasKey === null}>Enable camera</button>}
-        <small>{hasKey === false ? "Stored only in this browser. Never sent anywhere except Decart." : "Video streams to Decart only while this window is open."}</small>
+        {authEnabled && authStatus?.state === "signed-out"
+          ? <div className="signin-prompt">
+              <span>{liveMirrorMessage("UNAUTHENTICATED")}</span>
+              <button className="primary" onClick={signInOnFitcheck}>Sign in on Fitcheck</button>
+            </div>
+          : authEnabled
+            ? <button className="primary" onClick={() => void start()} disabled={authStatus?.state === "loading"}>Enable camera</button>
+            : hasKey === false
+              ? <button className="primary" onClick={() => chrome.runtime.openOptionsPage()}>Add your Decart API key</button>
+              : <button className="primary" onClick={() => void start()} disabled={hasKey === null}>Enable camera</button>}
+        <small>{!authEnabled && hasKey === false ? "Stored only in this browser. Never sent anywhere except Decart." : "Video streams to Decart only while this window is open."}</small>
         {authEnabled && <RoomAuthBadge />}
       </div>}
 
@@ -564,6 +637,9 @@ function Room() {
 }
 
 export default function RoomPage() {
-  const page = isGrantPage ? <GrantPage /> : <Room />
-  return authEnabled ? <ExtensionAuthProvider>{page}</ExtensionAuthProvider> : page
+  if (isGrantPage) return <GrantPage />
+  // Without configured auth there is no Clerk/Convex provider, so the room runs on the
+  // legacy Decart-key path exactly as before this migration.
+  if (!authEnabled) return <Room authStatus={null} liveMirrorAction={async () => { throw new LiveMirrorError("PENDING", liveMirrorMessage("PENDING")) }} />
+  return <ExtensionAuthProvider><RoomWithAuth /></ExtensionAuthProvider>
 }
