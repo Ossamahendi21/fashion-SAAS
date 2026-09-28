@@ -317,6 +317,13 @@ disabled:
 - No-network-provider test: with Decart unreachable, everything above still fails closed
   without hanging the room past the existing timeout.
 
+**Status (Step 2D):** every case above is now covered automatically in
+`extension/tests/live-mirror-secure.test.mjs` (35 tests, real `ConvexError` shape, no network)
+and `extension/tests/live-mirror.test.mjs` (25 tests). The remaining gate is the manual run against
+a real Clerk + Convex dev deployment: see **`docs/LIVE_MIRROR_E2E_TEST.md`**, which carries the
+ten-case walkthrough, the error contract table, the accepted residual risks, and the Fast Mode
+provider-cost blocker that must be decided before the local Decart key is deleted.
+
 ---
 
 ## Report

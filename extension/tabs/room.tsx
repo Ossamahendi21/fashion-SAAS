@@ -33,7 +33,14 @@ type Phase = "idle" | "starting" | "framing" | "ready"
 type GarmentStatus = "reading" | "waiting" | "fitting" | "live" | "failed"
 type Garment = { id: number; name: string; preview: string; status: GarmentStatus }
 type Token = LegacyToken
-type Notice = { message: string; action?: "settings" | "grant" | "restart" | "signin" }
+type NoticeAction = "settings" | "grant" | "restart" | "signin"
+type Notice = { message: string; action?: NoticeAction }
+const noticeButtonLabel: Record<NoticeAction, string> = {
+  settings: "Open settings",
+  grant: "Allow camera",
+  restart: "Start again",
+  signin: "Sign in on Fitcheck"
+}
 /** The id union the vendored SDK accepts; the server may only pick from this catalogue. */
 type RealtimeModelId = Parameters<typeof models.realtime>[0]
 
@@ -74,9 +81,10 @@ async function background<T>(type: string, fields: Record<string, unknown> = {})
 function friendly(error: any): Notice {
   // Secure authorization failures already carry safe copy; never rewrite or detail them.
   if (error instanceof LiveMirrorError) {
-    return error.failure === "UNAUTHENTICATED"
-      ? { message: error.message, action: "signin" }
-      : { message: error.message, action: "restart" }
+    // A retry button is only offered where retrying can actually change the outcome.
+    if (error.failure === "UNAUTHENTICATED") return { message: error.message, action: "signin" }
+    if (error.failure === "FEATURE_LOCKED" || error.failure === "SUBSCRIPTION_REFRESH_REQUIRED") return { message: error.message }
+    return { message: error.message, action: "restart" }
   }
   const message = String(error?.message || error || "")
   if (message === "NO_KEY") return { message: "Add your Decart API key to start.", action: "settings" }
@@ -84,7 +92,11 @@ function friendly(error: any): Notice {
   if (error?.name === "NotAllowedError") return { message: "Camera access is blocked for OpenWear.", action: "grant" }
   if (error?.name === "NotFoundError") return { message: "No camera found. Plug one in and try again." }
   if (error?.code?.startsWith?.("WEBRTC")) return { message: "Couldn't reach Decart's video servers. Check your network and try again.", action: "restart" }
-  return { message: message || "Something went wrong. Try again.", action: "restart" }
+  // The legacy background worker answers with a short "CODE" or a short reason; anything else
+  // reaching here is an unexpected throw (a Convex hybrid stack trace, a Decart body, a JS
+  // TypeError) and must not be rendered. Legacy copy only.
+  if (!/^[A-Z_]{3,32}$/.test(message) && message.length <= 80) return { message: message || "Something went wrong. Try again.", action: "restart" }
+  return { message: "Something went wrong. Try again.", action: "restart" }
 }
 
 /** Fallback when the browser won't prompt for the camera inside the iframe: ask from a full tab instead. */
@@ -243,6 +255,9 @@ function Room({ authStatus, liveMirrorAction }: {
     setNotice(null)
     // With auth configured, the server authorizer is mandatory, so a missing local key is fine.
     if (!authEnabled && !hasKey) { setNotice({ message: "Add your Decart API key to start.", action: "settings" }); return }
+    // Fail before the camera opens: a signed-out user has no way to obtain a token, so
+    // granting webcam access and framing first would be a prompt for nothing.
+    if (authEnabled && authStatus?.state === "signed-out") { setNotice({ message: liveMirrorMessage("UNAUTHENTICATED"), action: "signin" }); return }
     const session = ++sessionRef.current
     setPhase("starting")
     try {
@@ -268,7 +283,7 @@ function Room({ authStatus, liveMirrorAction }: {
       if (session !== sessionRef.current) return
       stop(friendly(error))
     }
-  }, [enterFraming, hasKey, markFramed, stop])
+  }, [authEnabled, authStatus, enterFraming, hasKey, markFramed, stop])
 
   /**
    * Opens the Decart realtime session with the first garment as its initial state.
@@ -630,7 +645,7 @@ function Room({ authStatus, liveMirrorAction }: {
         {live && remaining > 0 && <span className="timer">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}</span>}
       </div>}
       {connection === "reconnecting" && <div className="banner">Reconnecting…</div>}
-      {notice && <div className="notice" role="alert"><span>{notice.message}</span>{notice.action && <button onClick={onNoticeAction}>{notice.action === "settings" ? "Open settings" : notice.action === "grant" ? "Allow camera" : "Start again"}</button>}<button className="close" onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
+      {notice && <div className="notice" role="alert"><span>{notice.message}</span>{notice.action && <button onClick={onNoticeAction}>{noticeButtonLabel[notice.action]}</button>}<button className="close" onClick={() => setNotice(null)} aria-label="Dismiss">×</button></div>}
     </div>
     <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e => { const file = e.target.files?.[0]; if (file) void tryOn({ file, name: nameFromFile(file) }); e.target.value = "" }} />
   </div>
