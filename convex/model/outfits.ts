@@ -8,6 +8,7 @@ import type { vOutfitSlots } from "../shared/validators";
 import { LAYER_ORDER, SLOT_CATEGORIES, type Slot } from "../shared/wardrobe";
 import type { ItemSummary, OutfitView } from "../views";
 import { assertJobFinished } from "./jobs";
+import { isConsideringItem } from "./items";
 
 type Ctx = QueryCtx | MutationCtx;
 export type OutfitSlots = Infer<typeof vOutfitSlots>;
@@ -57,14 +58,18 @@ export async function layeredItems(ctx: Ctx, slots: OutfitSlots): Promise<Array<
 }
 
 /**
- * Throws INVALID_INPUT unless every id belongs to `user`, is ready, and matches its slot's categories.
- * Returns the human-readable problems instead when `collect` is true (used by the agent surface).
+ * Throws INVALID_INPUT unless every id belongs to `user`, is ready, is owned, and matches
+ * its slot's categories. Returns the human-readable problems instead when `collect` is true
+ * (used by the agent surface). `exceptOwnedCheck` names explicitly selected items (Style
+ * this item's hero) that may be considering; every other considering item is rejected so a
+ * candidate can never slip into general recommendations or the manual builder unasked.
  */
 export async function validateSlots(
   ctx: Ctx,
   user: Doc<"users">,
   slots: OutfitSlots,
   collect = false,
+  exceptOwnedCheck: Id<"items">[] = [],
 ): Promise<string[]> {
   const problems: string[] = [];
   const map = await resolveSlotItems(ctx, slots);
@@ -75,6 +80,8 @@ export async function validateSlots(
     if (item.status !== "ready") return problems.push(`${slot}: "${item.name}" isn't ready to use`);
     if (!SLOT_CATEGORIES[slot].includes(item.category))
       return problems.push(`${slot}: "${item.name}" is a ${item.category}, not ${slot}`);
+    if (isConsideringItem(item) && !exceptOwnedCheck.includes(item._id))
+      return problems.push(`${slot}: "${item.name}" is saved for later, not in your wardrobe yet`);
   };
   check("outerwear", slots.outerwear);
   check("top", slots.top);

@@ -8,6 +8,7 @@ import {
   vFormality,
   vItemStatus,
   vOutfitSlots,
+  vOwnership,
   vRenderQuality,
   vSeason,
 } from "./shared/validators";
@@ -36,6 +37,8 @@ export const vItemView = v.object({
   lastWornAt: v.optional(v.number()),
   duplicateOfId: v.optional(v.id("items")),
   uploadId: v.optional(v.id("uploads")),
+  /** Normalized at the view boundary: legacy rows without the field read as owned. */
+  ownership: vOwnership,
   /** Signed URL of the cutout, null while extracting or failed. */
   url: v.union(v.string(), v.null()),
   createdAt: v.number(),

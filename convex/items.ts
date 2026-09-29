@@ -6,6 +6,7 @@ import {
   hasAnyItem,
   listByUpload as listByUploadDocs,
   listForUser,
+  markItemOwned,
   markWorn as markItemWorn,
   removeItems,
   requireItem,
@@ -153,6 +154,21 @@ export const remove = mutation({
   handler: async (ctx, { itemIds }) => {
     const user = await requireUser(ctx);
     await removeItems(ctx, user, itemIds);
+    return null;
+  },
+});
+
+/**
+ * The purchase transition ("I bought this"): a ready considering item joins the owned
+ * wardrobe. Idempotent for already-owned items. No extraction, no embedding call, no credit
+ * charge, no provider call — cutout, embedding and provenance stay exactly as they are.
+ */
+export const markOwned = mutation({
+  args: { itemId: v.id("items") },
+  returns: v.null(),
+  handler: async (ctx, { itemId }) => {
+    const user = await requireUser(ctx);
+    await markItemOwned(ctx, user, itemId);
     return null;
   },
 });

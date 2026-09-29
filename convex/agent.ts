@@ -7,7 +7,7 @@ import { appError } from "./lib/errors";
 import { listForUser as listAvatars } from "./model/avatars";
 import { getBalance, hasCurrentFeature } from "./model/credits";
 import { countRunningUnits } from "./model/jobs";
-import { listForUser as listItems } from "./model/items";
+import { isOwnedItem, listForUser as listItems } from "./model/items";
 import {
   createOutfit,
   markOutfitSaved,
@@ -117,10 +117,12 @@ export const gapAnalysis = query({
 
 /** `by_user_status` capped at the wardrobe ceiling, so this query stays inside Convex's read limits. */
 async function readyItems(ctx: QueryCtx, userId: Id<"users">): Promise<Doc<"items">[]> {
-  return ctx.db
-    .query("items")
-    .withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "ready"))
-    .take(LIMITS.maxItemsPerUser);
+  return (
+    await ctx.db
+      .query("items")
+      .withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", "ready"))
+      .take(LIMITS.maxItemsPerUser)
+  ).filter(isOwnedItem);
 }
 
 function summariseGaps(items: Doc<"items">[]): Infer<typeof vGapAnalysis> {

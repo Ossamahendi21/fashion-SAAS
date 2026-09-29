@@ -216,6 +216,8 @@ export const recordShoppingDetection = internalMutation({
       attrs,
       bbox,
       status: granted > 0 ? "extracting" : "needsCredits",
+      // Shopping imports enter as candidates under consideration, never as owned wardrobe.
+      ownership: "considering",
     });
     const toExtract: ExtractTarget[] = granted > 0 ? [{ itemId, stepKey: extractStepKey(0) }] : [];
     if (toExtract.length > 0) {

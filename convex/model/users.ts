@@ -231,6 +231,15 @@ export async function purgeUserBatch(ctx: MutationCtx, userId: Id<"users">, mode
   budget -= threads.length;
   if (budget <= 0) return false;
 
+  // Cached shopping analyses carry no files; the fingerprint dies with the wardrobe anyway.
+  const advice = await ctx.db
+    .query("shoppingAdvice")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .take(budget);
+  for (const row of advice) await ctx.db.delete("shoppingAdvice", row._id);
+  budget -= advice.length;
+  if (budget <= 0) return false;
+
   const uploads = await ctx.db
     .query("uploads")
     .withIndex("by_user", (q) => q.eq("userId", userId))

@@ -18,6 +18,28 @@ export const vFit = literals(FITS);
 export const vPresentation = literals(PRESENTATIONS);
 export const vItemStatus = literals(ITEM_STATUSES);
 
+/**
+ * Ownership is a separate dimension from processing status. Rows that predate the field
+ * (ownership undefined) are owned — see isOwnedItem in model/items.ts.
+ */
+export const OWNERSHIP = ["owned", "considering"] as const;
+export type Ownership = (typeof OWNERSHIP)[number];
+export const vOwnership = literals(OWNERSHIP);
+
+/**
+ * Shopping-advice verdicts are descriptive buckets, never precise scores. A candidate is
+ * duplicate-heavy when an owned near-twin exists, wardrobe-gap when its category is missing,
+ * versatile when it combines freely with owned pieces, limited-match otherwise.
+ */
+export const ADVICE_LABELS = ["duplicate-heavy", "versatile", "wardrobe-gap", "limited-match"] as const;
+export type AdviceLabel = (typeof ADVICE_LABELS)[number];
+export const vAdviceLabel = literals(ADVICE_LABELS);
+
+/** Deterministic advice signal kinds: what the analysis factually found, in plain words. */
+export const ADVICE_SIGNAL_TYPES = ["similar_owned", "many_matches", "wardrobe_gap", "limited_matches"] as const;
+export type AdviceSignalType = (typeof ADVICE_SIGNAL_TYPES)[number];
+export const vAdviceSignalType = literals(ADVICE_SIGNAL_TYPES);
+
 export const vPlanId = literals(PLAN_IDS);
 export const vFeature = literals(FEATURES);
 export const vRenderQuality = literals(RENDER_QUALITIES);

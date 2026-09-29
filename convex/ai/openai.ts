@@ -16,10 +16,12 @@ import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot 
 import { dominantHex } from "./colours";
 import { normalizeImageInput } from "./image_input";
 import {
+  coerceAdviceResponse,
   coerceStylingResponse,
   detectionInstructions,
   extractionPrompt,
   renderPrompt,
+  shoppingAdviceSummary,
   shoppingDetectionInstructions,
   stylingSuggestions,
   type StylingWardrobeItem,
@@ -244,6 +246,73 @@ export const styleItemOutfits = internalAction({
   },
 });
 
+/**
+ * gpt-5-mini turns server-derived advice facts into a concise purchase-decision summary.
+ * Text-only (no images). The model receives structured facts — never item ids, never
+ * prompts, never page content — and returns bounded prose; malformed output degrades to
+ * deterministic-only advice instead of failing.
+ */
+export const summarizeShoppingAdvice = internalAction({
+  args: {
+    candidate: v.object({
+      name: v.string(),
+      category: v.string(),
+      subcategory: v.string(),
+      colours: v.array(v.string()),
+      pattern: v.string(),
+      material: v.string(),
+      season: v.array(v.string()),
+      formality: v.string(),
+    }),
+    similar: v.array(
+      v.object({ name: v.string(), category: v.string(), band: v.union(v.literal("very similar"), v.literal("similar")) }),
+    ),
+    matchCount: v.number(),
+    outfitDisplay: v.string(),
+    signals: v.array(v.string()),
+    label: v.string(),
+    presentation: v.string(),
+    fit: v.string(),
+  },
+  returns: v.object({
+    summary: v.string(),
+    pros: v.array(v.string()),
+    considerations: v.array(v.string()),
+    usage: v.object({ inputTextTokens: v.number(), outputTokens: v.number() }),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ summary: string; pros: string[]; considerations: string[]; usage: { inputTextTokens: number; outputTokens: number } }> => {
+    try {
+      const { instructions, schema } = shoppingAdviceSummary({
+        candidate: { ...args.candidate },
+        similar: args.similar.map((entry) => ({ ...entry })),
+        matchCount: args.matchCount,
+        outfitDisplay: args.outfitDisplay,
+        signals: [...args.signals],
+        label: args.label,
+        presentation: args.presentation,
+        fit: args.fit,
+      });
+      const response = await openai().responses.create({
+        model: modelId(DETECT_MODEL),
+        input: [{ role: "user", content: [{ type: "input_text", text: instructions }] }],
+        text: { format: { type: "json_schema", name: "shopping_advice", schema, strict: true } },
+      });
+      return {
+        ...coerceAdviceResponse(response.output_text),
+        usage: {
+          inputTextTokens: response.usage?.input_tokens ?? 0,
+          outputTokens: response.usage?.output_tokens ?? 0,
+        },
+      };
+    } catch (error) {
+      if (isAppError(error)) throw error;
+      throw appError("UPSTREAM_FAILED", "Advice is temporarily unavailable. Please try again.");
+    }
+  },
+});
 /**
  * One item: cut it out of its source photo, store the PNG, read its swatches, embed it and flag it
  * as a duplicate of an existing item when the vectors all but match.

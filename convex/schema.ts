@@ -1,6 +1,9 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import {
+  vAdviceLabel,
+  vAdviceSignalType,
+  vCategory,
   vDetectedItem,
   vFeature,
   vItemAttributes,
@@ -10,6 +13,7 @@ import {
   vJobType,
   vLiveMirrorSessionStatus,
   vOutfitSlots,
+  vOwnership,
   vPlanId,
   vPrefs,
   vRenderQuality,
@@ -100,6 +104,11 @@ export default defineSchema({
     notes: v.optional(v.string()),
     searchText: v.string(),
     status: vItemStatus,
+    /**
+     * Ownership dimension, independent of processing status. Undefined means owned
+     * (all rows predating the field); shopping imports write "considering".
+     */
+    ownership: v.optional(vOwnership),
     wearCount: v.number(),
     lastWornAt: v.optional(v.number()),
     duplicateOfId: v.optional(v.id("items")),
@@ -298,4 +307,37 @@ export default defineSchema({
     count: v.number(),
     avgMs: v.number(),
   }).index("by_key", ["key"]),
+
+  /**
+   * Cached "Should I buy this?" analyses, one per (user, candidate). The fingerprint covers
+   * the candidate and the owned wardrobe, so any change recomputes; only full AI analyses
+   * are cached (cheap deterministic-only results recompute live). Thumbnail URLs are never
+   * stored here — readers re-resolve them from the items. Cleaned by purgeUserBatch.
+   */
+  shoppingAdvice: defineTable({
+    userId: v.id("users"),
+    itemId: v.id("items"),
+    fingerprint: v.string(),
+    label: vAdviceLabel,
+    summary: v.optional(v.string()),
+    pros: v.array(v.string()),
+    considerations: v.array(v.string()),
+    similar: v.array(
+      v.object({
+        itemId: v.id("items"),
+        name: v.string(),
+        category: vCategory,
+        similarity: v.number(),
+        duplicate: v.boolean(),
+      }),
+    ),
+    matchCount: v.number(),
+    matchingIds: v.array(v.id("items")),
+    estimatedCombinations: v.number(),
+    signals: v.array(v.object({ type: vAdviceSignalType, message: v.string() })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_item", ["userId", "itemId"])
+    .index("by_user", ["userId"]),
 });

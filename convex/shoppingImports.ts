@@ -1,7 +1,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUser } from "./lib/auth";
-import { readShoppingImportStatus, registerShoppingImport } from "./model/shoppingImports";
+import { listSavedShoppingItems, readShoppingImportStatus, registerShoppingImport } from "./model/shoppingImports";
+import { vOwnership } from "./shared/validators";
+import { vItemView } from "./views";
 
 /**
  * Shopping imports: the extension's "Save to wardrobe" path. Authenticated Convex functions
@@ -25,6 +27,14 @@ export const vShoppingImportStatus = v.object({
   itemName: v.optional(v.string()),
   itemUrl: v.optional(v.string()),
   duplicateOfId: v.optional(v.id("items")),
+  ownership: v.optional(vOwnership),
+});
+
+export const vSavedShoppingItem = v.object({
+  item: vItemView,
+  sourceTitle: v.optional(v.string()),
+  sourcePageUrl: v.optional(v.string()),
+  createdAt: v.number(),
 });
 
 /**
@@ -52,4 +62,15 @@ export const status = query({
   returns: vShoppingImportStatus,
   handler: async (ctx, { uploadId }) =>
     readShoppingImportStatus(ctx, await requireUser(ctx), uploadId),
+});
+
+/**
+ * Saved shopping candidates: considering items with provenance, newest first. Ownership
+ * enforced (own rows only). The future Saved page reads this; the default wardrobe never
+ * sees these rows. No provider data, no secrets.
+ */
+export const listSaved = query({
+  args: {},
+  returns: v.array(vSavedShoppingItem),
+  handler: async (ctx) => listSavedShoppingItems(ctx, await requireUser(ctx)),
 });

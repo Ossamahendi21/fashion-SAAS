@@ -41,25 +41,35 @@ import {
   takeProviderConnection
 } from "../lib/freeze"
 import {
+  ADVICE_COPY,
   buildOutfitUrl,
   consumeCapability,
+  createAdviceClient,
   createWardrobeSaver,
   generateShoppingUploadUrl,
+  markItemOwned,
   postBlobToConvex,
   registerShoppingImport,
   parseGarmentMessage,
   requestItemStyling,
+  requestShoppingAdvice,
   SAVE_COPY,
   saveOutfitProposal,
   saveRemoteGarment,
   shoppingImportStatus,
   STYLE_COPY,
+  OWN_COPY,
+  toAdviceFailureMessage,
   toSaveFailureMessage,
   toStyleFailureMessage,
+  type AdviceClient,
+  type AdvicePhase,
   type SavePhase,
+  type ShoppingAdvice,
   type StyledSuggestion,
   type StylePhase,
   type StylingResult,
+  type OwnPhase,
   type WardrobeSaveDeps
 } from "../lib/wardrobe-save"
 import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
@@ -196,6 +206,10 @@ function RoomWithAuth() {
   // Never authorizes Live Mirror, never touches the camera.
   const styleItemAction = useAction(requestItemStyling)
   const saveOutfitAction = useMutation(saveOutfitProposal)
+  const markOwnedAction = useMutation(markItemOwned)
+  // Should-I-buy-this: one authenticated analysis per click. Never saves, uploads,
+  // styles, or authorizes Live Mirror — the server derives everything from the item id.
+  const adviceAction = useAction(requestShoppingAdvice)
   return (
     <Room
       authStatus={status}
@@ -205,11 +219,13 @@ function RoomWithAuth() {
       wardrobeSave={wardrobeSave}
       requestStyling={(args) => styleItemAction(args)}
       saveOutfitProposal={(args) => saveOutfitAction(args)}
+      markOwned={(args) => markOwnedAction(args)}
+      requestAdvice={(args) => adviceAction(args)}
     />
   )
 }
 
-function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal }: {
+function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal, markOwned, requestAdvice }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
   refreshBilling?: () => Promise<unknown>
@@ -217,6 +233,8 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
   wardrobeSave: WardrobeSaveDeps
   requestStyling: (args: { itemId: string }) => Promise<StylingResult>
   saveOutfitProposal: (args: { outfitId: string }) => Promise<null>
+  markOwned: (args: { itemId: string }) => Promise<null>
+  requestAdvice: (args: { itemId: string }) => Promise<ShoppingAdvice>
 }) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -265,10 +283,28 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     savedOutfitIds?: string[]
   } | null>(null)
   const stylingRef = useRef(false)
+  // Purchase transition for a saved shopping candidate ("I bought this"), scoped to the
+  // visible garment like the save UI. No upload, no AI, no extraction, no Live Mirror.
+  const [ownState, setOwnState] = useState<{ garmentId: number; itemId: string; phase: OwnPhase } | null>(null)
+  const owningRef = useRef(false)
+  const ownStateRef = useRef<typeof ownState>(null)
+  ownStateRef.current = ownState
+  // Should-I-buy-this decision aid, scoped to the visible garment like the save UI: a
+  // compact panel of deterministic wardrobe facts plus bounded prose. A stale completion
+  // never paints newer UI, and buying the item closes the panel (see markOwnedItem).
+  const [adviceState, setAdviceState] = useState<{
+    garmentId: number
+    itemId: string
+    phase: AdvicePhase
+    advice?: ShoppingAdvice
+  } | null>(null)
+  const advisingRef = useRef(false)
   // Server authorization: one in-flight mint at a time, shared by concurrent starts.
   const authorizer = useMemo(() => createLiveMirrorAuthorizer(), [])
   // Wardrobe saver: single-flight per idempotency key, independent of Live Mirror entirely.
   const saver = useMemo(() => createWardrobeSaver(wardrobeSave), [wardrobeSave])
+  // Advice client: single-flight per item id, analysis only — never saves or uploads.
+  const advice: AdviceClient = useMemo(() => createAdviceClient({ requestAdvice }), [requestAdvice])
 
   // Refs mirror state that the animation loop and async callbacks read without re-rendering.
   const stageRef = useRef<HTMLDivElement>(null)
@@ -659,12 +695,17 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
       if (terminal === "needs_credits") setNotice({ message: SAVE_COPY.needs_credits.note! })
       if (terminal === "no_item") setNotice({ message: SAVE_COPY.no_item.note! })
       // A saved garment becomes styleable: resolve its wardrobe item id once, so Style this
-      // item needs no re-upload and no second registration.
+      // item needs no re-upload and no second registration. A still-considering candidate
+      // also becomes eligible for the purchase transition ("I bought this").
       if (terminal === "ready") {
         try {
           const status = await wardrobeSave.queryStatus(uploadId)
           if (garmentRef.current?.id === id && status.state === "ready" && status.itemId) {
             setStyleState({ garmentId: id, itemId: status.itemId, phase: "idle" })
+            if (status.ownership !== "owned") {
+              setOwnState({ garmentId: id, itemId: status.itemId, phase: "idle" })
+              setAdviceState({ garmentId: id, itemId: status.itemId, phase: "idle" })
+            }
           }
         } catch {
           // Saving already succeeded; styling simply stays unavailable for this garment.
@@ -712,6 +753,36 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     }
   }, [requestStyling, styleState])
 
+  /**
+   * Should-I-buy-this analysis for the saved candidate: one authenticated request per
+   * click through the existing single-flight guard, then a compact decision panel. Never
+   * saves, never re-uploads, never registers again, never styles, never authorizes Live
+   * Mirror, never touches the camera. A stale completion (newer garment loaded meanwhile,
+   * or the item bought meanwhile) resolves without painting.
+   */
+  const analyzeItem = useCallback(async () => {
+    if (advisingRef.current) return
+    const current = garmentRef.current
+    const state = adviceState
+    if (!current || !state || state.garmentId !== current.id || !state.itemId) return
+    if (state.phase === "analyzing") return
+    const { garmentId, itemId } = state
+    advisingRef.current = true
+    setAdviceState({ garmentId, itemId, phase: "analyzing" })
+    try {
+      const result: ShoppingAdvice = await advice.analyze(itemId)
+      if (garmentRef.current?.id !== garmentId) return
+      if (ownStateRef.current?.garmentId === garmentId && ownStateRef.current?.phase === "owned") return
+      setAdviceState({ garmentId, itemId, phase: "ready", advice: result })
+    } catch (error: any) {
+      if (garmentRef.current?.id !== garmentId) return
+      setAdviceState({ garmentId, itemId, phase: "failed" })
+      setNotice({ message: toAdviceFailureMessage(error) })
+    } finally {
+      advisingRef.current = false
+    }
+  }, [advice, adviceState])
+
   /** Keeps one proposal outfit: the web stylist UI saves through this same mutation. */
   const saveSuggestionOutfit = useCallback(async (outfitId: string) => {
     const state = styleState
@@ -733,6 +804,36 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     void chrome.tabs.create({ url: buildOutfitUrl(getAuthConfig().fitcheckAppUrl, outfitId) })
   }, [styleState])
 
+  /**
+   * Purchase transition for the saved candidate ("I bought this"): one authenticated mutation,
+   * guarded against double-clicks and stale garments. No upload, no AI, no extraction credit,
+   * no Live Mirror — the server flips one field and keeps cutout, embedding and provenance.
+   */
+  const markOwnedItem = useCallback(async () => {
+    if (owningRef.current) return
+    const state = ownState
+    const current = garmentRef.current
+    if (!state || !current || state.garmentId !== current.id || !state.itemId) return
+    if (state.phase !== "idle") return
+    const { garmentId, itemId } = state
+    owningRef.current = true
+    setOwnState({ ...state, phase: "marking" })
+    try {
+      await markOwned({ itemId })
+      if (garmentRef.current?.id !== garmentId) return
+      setOwnState({ ...state, phase: "owned" })
+      // The candidate just joined the owned wardrobe: advice for "should I buy this?"
+      // no longer applies, so the panel closes instead of going stale.
+      setAdviceState(null)
+    } catch (error: any) {
+      if (garmentRef.current?.id !== garmentId) return
+      setOwnState({ ...state, phase: "idle" })
+      setNotice({ message: toSaveFailureMessage(error) })
+    } finally {
+      owningRef.current = false
+    }
+  }, [markOwned, ownState])
+
   /** Entry point for every garment: load and normalise the image, then apply it. */
   const tryOn = useCallback(async (incoming: Incoming) => {
     setNotice(null); setDragging(false)
@@ -752,6 +853,8 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     })
     setSaveState({ garmentId: id, clientImportId, phase: "idle" })
     setStyleState(null)
+    setOwnState(null)
+    setAdviceState(null)
     if (phaseRef.current === "idle") void start()
     // The scan only runs once the user is framed; apply() starts it.
     try {
@@ -989,6 +1092,12 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
   // Save button state belongs to the visible garment only; a stale save can never paint it.
   const savePhase: SavePhase = saveState && garment && saveState.garmentId === garment.id ? saveState.phase : "idle"
   const saveBusy = savePhase === "saving" || savePhase === "processing"
+  // Purchase-transition state likewise belongs to the visible garment only.
+  const ownPhase: OwnPhase | null = ownState && garment && ownState.garmentId === garment.id ? ownState.phase : null
+  // Advice state likewise belongs to the visible garment only, and only while the
+  // candidate is still considering: buying it closes the panel (see markOwnedItem).
+  const adviceForGarment = adviceState && garment && adviceState.garmentId === garment.id && adviceState.itemId ? adviceState : null
+  const showAdvice = ownPhase !== null && ownPhase !== "owned" && adviceForGarment !== null
   // Informational only: authorizeLiveMirror stays authoritative for every new session.
   const quotaCopy = quotaStatusCopy(quotaStatus)
   // The Freeze control appears only once a usable AI frame is on screen (live implies the
@@ -1053,9 +1162,46 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
           <span className="garment-status">{garment.status === "live" && <i className="dot" />}{statusText[garment.status]}</span>
         </div>
         {garment.preview ? <div className="save-row">
-          <button className="save" onClick={() => void saveToWardrobe()} disabled={saveBusy || savePhase === "ready"} title="Save this garment to your Fitcheck wardrobe">
+          <button className="save" onClick={() => void saveToWardrobe()} disabled={saveBusy || savePhase === "ready"} title="Save this shopping find to Fitcheck">
             {SAVE_COPY[savePhase].button}
           </button>
+        </div> : null}
+        {ownPhase ? <div className="save-row">
+          <button
+            className="save"
+            onClick={() => void markOwnedItem()}
+            disabled={ownPhase !== "idle"}
+            title="Move this saved find into your owned wardrobe"
+          >
+            {ownPhase === "marking" ? OWN_COPY.markingButton : ownPhase === "owned" ? OWN_COPY.ownedButton : OWN_COPY.ownButton}
+          </button>
+        </div> : null}
+        {showAdvice && adviceForGarment ? <div className="advice-row">
+          {adviceForGarment.phase === "ready" && adviceForGarment.advice ? <div className="advice-panel">
+            {adviceForGarment.advice.note ? <p>{adviceForGarment.advice.note}</p> : null}
+            {adviceForGarment.advice.similarOwnedItems.length > 0 ? <div className="advice-similar">
+              {adviceForGarment.advice.similarOwnedItems.filter(item => item.url).map(item => (
+                <span className="advice-thumb" key={item.itemId} title={item.name}>
+                  <img src={item.url!} alt="" />
+                  {item.duplicate ? <i>Own it</i> : null}
+                </span>
+              ))}
+            </div> : null}
+            {adviceForGarment.advice.signals.slice(0, 3).map((signal, index) => (
+              <span key={`${signal.type}-${index}`}>{signal.message}</span>
+            ))}
+            <span>Works with {adviceForGarment.advice.matchCount} pieces you own · {adviceForGarment.advice.outfitPotential.display}</span>
+            {adviceForGarment.advice.summary ? <p>{adviceForGarment.advice.summary}</p> : null}
+            {adviceForGarment.advice.pros.length > 0 ? <ul>{adviceForGarment.advice.pros.slice(0, 3).map(pro => <li key={pro}>{pro}</li>)}</ul> : null}
+            {adviceForGarment.advice.considerations.length > 0 ? <ul>{adviceForGarment.advice.considerations.slice(0, 3).map(point => <li key={point}>{point}</li>)}</ul> : null}
+          </div> : <button
+            className="save"
+            onClick={() => void analyzeItem()}
+            disabled={adviceForGarment.phase === "analyzing"}
+            title="See how this saved find fits your wardrobe"
+          >
+            {adviceForGarment.phase === "analyzing" ? ADVICE_COPY.analyzingButton : adviceForGarment.phase === "failed" ? ADVICE_COPY.failedButton : ADVICE_COPY.adviceButton}
+          </button>}
         </div> : null}
         {styleState && styleState.garmentId === garment.id && styleState.itemId ? <div className="style-row">
           {styleState.phase === "ready" ? <div className="suggestions">

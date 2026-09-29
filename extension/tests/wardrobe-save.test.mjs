@@ -147,11 +147,11 @@ test("28–32: terminal states resolve with exact UI copy", async () => {
   const terminal = await wardrobe.watch("uploads-1", { onPhase: phase => seen.push(phase), intervalMs: 1 })
   assert.equal(terminal, "ready")
   assert.deepEqual(seen, ["processing", "ready"])
-  assert.equal(saver.SAVE_COPY.ready.button, "Saved to wardrobe ✓")
+  assert.equal(saver.SAVE_COPY.ready.button, "Saved ✓")
   assert.equal(saver.SAVE_COPY.needs_credits.button, "Needs 1 credit to finish")
   assert.equal(saver.SAVE_COPY.no_item.button, "Couldn't identify this product")
   assert.equal(saver.SAVE_COPY.failed.button, "Couldn't save. Try again.")
-  assert.equal(saver.SAVE_COPY.idle.button, "Save to wardrobe")
+  assert.equal(saver.SAVE_COPY.idle.button, "Save item")
 })
 
 test("27: a stale completion resolves quietly without touching new UI", async () => {

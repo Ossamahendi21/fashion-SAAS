@@ -109,9 +109,9 @@ export async function persistStylingSuggestions(
   for (const candidate of raw.slice(0, MAX_STYLING_SUGGESTIONS)) {
     // String ids from the model are untrusted until the database confirms them; the cast is
     // safe because validateSlots + the selected-item check below reject anything foreign.
-    // Accessories default to empty so a sparse suggestion cannot crash slot iteration.
+    // The explicitly selected hero may be considering; every other slot must be owned.
     const slots = { ...candidate.slots, accessories: candidate.slots.accessories ?? [] } as unknown as OutfitSlots;
-    const problems = await validateSlots(ctx, user, slots, true);
+    const problems = await validateSlots(ctx, user, slots, true, [item._id]);
     const ids = new Set(slotItemIds(slots));
     if (!ids.has(item._id)) problems.push(`"${item.name}" must appear in every suggestion`);
     if (problems.length === 0) valid.push({ name: candidate.name, reasoning: candidate.reasoning, slots });

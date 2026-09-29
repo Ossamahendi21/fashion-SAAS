@@ -2,15 +2,30 @@ import type { Infer } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { assertOwner } from "../lib/auth";
+import { appError } from "../lib/errors";
 import { LIMITS, usageToUsd, type TokenUsage } from "../shared/credits";
-import type { vItemAttributes } from "../shared/validators";
+import { vItemAttributes } from "../shared/validators";
 import { CATEGORY_LABELS, ITEM_STATUSES, type Category } from "../shared/wardrobe";
 import type { ItemView } from "../views";
 import { removeItemsFromOutfits } from "./outfits";
+import { deleteShoppingAdviceForItem } from "./shoppingAdvice";
 import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
 export type ItemAttributes = Infer<typeof vItemAttributes>;
+
+/**
+ * Ownership single source of truth. Processing status (ready/extracting/…) and ownership
+ * (owned/considering) are independent dimensions; rows predating the field read as owned so
+ * existing wardrobes never disappear.
+ */
+export function isOwnedItem(item: { ownership?: Doc<"items">["ownership"] }): boolean {
+  return item.ownership !== "considering";
+}
+
+export function isConsideringItem(item: { ownership?: Doc<"items">["ownership"] }): boolean {
+  return item.ownership === "considering";
+}
 
 /** What full-text search matches on. Recomputed whenever attributes change. */
 export function buildSearchText(attrs: ItemAttributes): string {
@@ -71,6 +86,7 @@ export async function toItemView(ctx: Ctx, item: Doc<"items">): Promise<ItemView
     lastWornAt: item.lastWornAt,
     duplicateOfId: item.duplicateOfId,
     uploadId: item.uploadId,
+    ownership: isOwnedItem(item) ? "owned" : "considering",
     url,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
@@ -90,6 +106,8 @@ export async function insertDetectedItem(
     attrs: ItemAttributes;
     bbox?: number[];
     status: Extract<Doc<"items">["status"], "extracting" | "needsCredits">;
+    /** Shopping imports pass "considering"; normal uploads omit it (owned by default). */
+    ownership?: Doc<"items">["ownership"];
   },
 ): Promise<Id<"items">> {
   const now = Date.now();
@@ -100,6 +118,7 @@ export async function insertDetectedItem(
     ...input.attrs,
     searchText: buildSearchText(input.attrs),
     status: input.status,
+    ...(input.ownership ? { ownership: input.ownership } : {}),
     wearCount: 0,
     createdAt: now,
     updatedAt: now,
@@ -160,6 +179,24 @@ export async function markItemPending(ctx: MutationCtx, itemId: Id<"items">, job
   await ctx.db.patch(itemId, { pendingJobId: jobId, updatedAt: Date.now() });
 }
 
+/**
+ * The purchase/lifecycle transition: a ready considering item joins the owned wardrobe.
+ * Idempotent for already-owned items. No extraction, no embedding call, no credit charge,
+ * no provider call — the cutout, embedding and provenance all stay exactly as they are.
+ */
+export async function markItemOwned(ctx: MutationCtx, user: Doc<"users">, itemId: Id<"items">): Promise<boolean> {
+  const item = await requireItem(ctx, user, itemId);
+  if (item.status !== "ready") {
+    throw appError("INVALID_INPUT", "Only ready items can join your wardrobe.");
+  }
+  // A bought candidate is no longer eligible for "Should I buy this?": its analysis
+  // row dies with the transition. No provider call, no credits, no embedding change.
+  await deleteShoppingAdviceForItem(ctx, user._id, item._id);
+  if (isOwnedItem(item)) return false;
+  await ctx.db.patch(item._id, { ownership: "owned", updatedAt: Date.now() });
+  return true;
+}
+
 /** Embeddings live in their own table (`by_item`), one row per item; writing twice replaces the row. */
 export async function setItemEmbedding(
   ctx: MutationCtx,
@@ -196,7 +233,10 @@ export async function readyItemsForEmbeddings(
   const items = await Promise.all(
     rows.map((row) => (row && row.itemId !== exclude ? ctx.db.get(row.itemId) : Promise.resolve(null))),
   );
-  return items.filter((item): item is Doc<"items"> => item !== null && item.status === "ready").map((item) => item._id);
+  const ready = items.filter((item): item is Doc<"items"> => item !== null && item.status === "ready");
+  // Owned duplicates first: for a shopping candidate, "you already own something similar" is the
+  // useful answer; a considering-considering match must not hide it.
+  return [...ready.filter(isOwnedItem), ...ready.filter(isConsideringItem)].map((item) => item._id);
 }
 
 async function deleteFile(ctx: MutationCtx, storageId: Id<"_storage">): Promise<void> {
@@ -212,7 +252,15 @@ export async function updateAttributes(
   item: Doc<"items">,
   patch: Partial<ItemAttributes> & { notes?: string },
 ): Promise<void> {
-  const { notes, ...attrPatch } = patch;
+  const { notes, ...rest } = patch;
+  // Explicit allowlist: unknown keys (notably ownership) can never sneak in, even if a
+  // validator ever loosens. Ownership changes only through markItemOwned.
+  const attrPatch: Partial<ItemAttributes> = {};
+  for (const key of Object.keys(vItemAttributes.fields) as (keyof ItemAttributes)[]) {
+    if (rest[key] !== undefined) {
+      (attrPatch as Record<string, unknown>)[key] = rest[key];
+    }
+  }
   const attrs = { ...attributesOf(item), ...attrPatch };
   await ctx.db.patch(item._id, {
     ...attrPatch,
@@ -263,10 +311,15 @@ export async function requireItem(ctx: Ctx, user: Doc<"users">, itemId: Id<"item
 export async function listForUser(
   ctx: Ctx,
   userId: Id<"users">,
-  filters: { status?: Doc<"items">["status"]; category?: Category } = {},
+  filters: { status?: Doc<"items">["status"]; category?: Category; ownership?: "owned" | "considering" | "all" } = {},
 ): Promise<Doc<"items">[]> {
   const status = filters.status ?? "ready";
   const category = filters.category;
+  // The default wardrobe experience contains OWNED items only; considering candidates are
+  // visible through the saved-shopping query. Pass ownership explicitly to override.
+  const ownership = filters.ownership ?? "owned";
+  const ownedOnly = (rows: Doc<"items">[]) =>
+    ownership === "all" ? rows : rows.filter((row) => (ownership === "owned" ? isOwnedItem(row) : isConsideringItem(row)));
   // Bounded by LIMITS.maxItemsPerUser: the wardrobe has a hard ceiling, so one page is the whole list.
   const items = category
     ? (
@@ -281,16 +334,19 @@ export async function listForUser(
         .withIndex("by_user_status", (q) => q.eq("userId", userId).eq("status", status))
         .order("desc")
         .take(LIMITS.maxItemsPerUser);
-  return items.sort((a, b) => b.createdAt - a.createdAt);
+  return ownedOnly(items).sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export async function searchForUser(ctx: Ctx, userId: Id<"users">, text: string, limit = 50): Promise<Doc<"items">[]> {
   const term = text.trim();
   if (!term) return [];
-  return ctx.db
-    .query("items")
-    .withSearchIndex("search_text", (q) => q.search("searchText", term.toLowerCase()).eq("userId", userId))
-    .take(Math.min(Math.max(limit, 1), 100));
+  // Consistent with the default wardrobe: owned items only, so a candidate never poses as owned.
+  return (
+    await ctx.db
+      .query("items")
+      .withSearchIndex("search_text", (q) => q.search("searchText", term.toLowerCase()).eq("userId", userId))
+      .take(Math.min(Math.max(limit, 1), 100))
+  ).filter(isOwnedItem);
 }
 
 export async function listByUpload(ctx: Ctx, uploadId: Id<"uploads">): Promise<Doc<"items">[]> {
@@ -336,6 +392,9 @@ export async function removeItems(ctx: MutationCtx, user: Doc<"users">, itemIds:
     if (item.storageId) await deleteFile(ctx, item.storageId);
     if (item.thumbStorageId) await deleteFile(ctx, item.thumbStorageId);
     await deleteItemEmbedding(ctx, item._id);
+    // The advice cache follows the candidate: no orphan rows accumulate from
+    // save → analyze → delete cycles. Missing cache is a no-op by contract.
+    await deleteShoppingAdviceForItem(ctx, user._id, item._id);
     await ctx.db.delete("items", item._id);
   }
   await removeItemsFromOutfits(

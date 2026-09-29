@@ -10,7 +10,8 @@ import { ACCEPTED_IMAGE_TYPES, MAX_UPLOAD_BYTES } from "../shared/wardrobe";
 import { assertStoredImage } from "./uploads";
 import { bumpUsageCounter } from "./users";
 import { assertBelowJobLimit, createJob, setStep, setWorkflowId } from "./jobs";
-import { listByUpload } from "./items";
+import { isConsideringItem, isOwnedItem, listByUpload, toItemView } from "./items";
+import type { ItemView } from "../views";
 
 type Ctx = QueryCtx | MutationCtx;
 
@@ -43,6 +44,15 @@ export type ShoppingImportStatus = {
   itemName?: string;
   itemUrl?: string;
   duplicateOfId?: Id<"items">;
+  /** Normalized ownership of the returned item, so clients render truthfully. */
+  ownership?: "owned" | "considering";
+};
+
+export type SavedShoppingItem = {
+  item: ItemView;
+  sourceTitle?: string;
+  sourcePageUrl?: string;
+  createdAt: number;
 };
 
 /**
@@ -196,6 +206,7 @@ export async function readShoppingImportStatus(
       itemName: ready.name,
       ...(itemUrl ? { itemUrl } : {}),
       ...(ready.duplicateOfId ? { duplicateOfId: ready.duplicateOfId } : {}),
+      ownership: isOwnedItem(ready) ? ("owned" as const) : ("considering" as const),
     };
   }
   const needsCredits = items.find((item) => item.status === "needsCredits");
@@ -206,6 +217,7 @@ export async function readShoppingImportStatus(
       ...(upload.jobId ? { jobId: upload.jobId } : {}),
       itemId: needsCredits._id,
       itemName: needsCredits.name,
+      ownership: isOwnedItem(needsCredits) ? ("owned" as const) : ("considering" as const),
     };
   }
   if (upload.jobId) {
@@ -218,4 +230,35 @@ export async function readShoppingImportStatus(
     return { state: "no_item", uploadId: upload._id, ...(upload.jobId ? { jobId: upload.jobId } : {}) };
   }
   return { state: "processing", uploadId: upload._id, ...(upload.jobId ? { jobId: upload.jobId } : {}) };
+}
+
+/**
+ * Saved shopping candidates: considering items with their provenance, newest first.
+ * Ownership enforced (own rows only). Bounded by the wardrobe ceiling read, so no new index
+ * is needed. The future Saved page reads this; the default wardrobe never sees these rows.
+ */
+export async function listSavedShoppingItems(
+  ctx: Ctx,
+  user: Doc<"users">,
+): Promise<SavedShoppingItem[]> {
+  const uploads = await ctx.db
+    .query("uploads")
+    .withIndex("by_user", (q) => q.eq("userId", user._id))
+    .order("desc")
+    .take(LIMITS.maxItemsPerUser);
+  const saved: SavedShoppingItem[] = [];
+  for (const upload of uploads) {
+    if (upload.source !== "shopping") continue;
+    const items = await listByUpload(ctx, upload._id);
+    for (const item of items) {
+      if (!isConsideringItem(item)) continue;
+      saved.push({
+        item: await toItemView(ctx, item),
+        ...(upload.sourceTitle ? { sourceTitle: upload.sourceTitle } : {}),
+        ...(upload.sourcePageUrl ? { sourcePageUrl: upload.sourcePageUrl } : {}),
+        createdAt: item.createdAt,
+      });
+    }
+  }
+  return saved.sort((a, b) => b.createdAt - a.createdAt);
 }

@@ -28,6 +28,7 @@ export type ShoppingImportStatus = {
   itemName?: string
   itemUrl?: string
   duplicateOfId?: string
+  ownership?: "owned" | "considering"
 }
 
 /** Authenticated Convex references. The extension never imports the Convex backend. */
@@ -56,6 +57,107 @@ export const requestItemStyling = makeFunctionReference<
 export const saveOutfitProposal = makeFunctionReference<"mutation", { outfitId: string }, null>(
   "threads:saveProposal"
 )
+
+/** Purchase transition for a saved shopping candidate. No upload, AI, extraction, or mint. */
+export const markItemOwned = makeFunctionReference<"mutation", { itemId: string }, null>(
+  "items:markOwned"
+)
+
+// ---------- Should I buy this? (Step 3E) ----------
+
+export type AdviceSignal = {
+  type: "similar_owned" | "many_matches" | "wardrobe_gap" | "limited_matches"
+  message: string
+}
+
+export type AdviceSimilarItem = {
+  itemId: string
+  name: string
+  category: string
+  url: string | null
+  similarity: number
+  duplicate: boolean
+}
+
+export type AdviceMatchItem = {
+  _id: string
+  name: string
+  category: string
+  url: string | null
+}
+
+export type ShoppingAdvice = {
+  candidate: { itemId: string; name: string }
+  similarOwnedItems: AdviceSimilarItem[]
+  matchingOwnedItems: AdviceMatchItem[]
+  matchCount: number
+  outfitPotential: { estimatedCombinations: number; display: string }
+  label: "duplicate-heavy" | "versatile" | "wardrobe-gap" | "limited-match"
+  signals: AdviceSignal[]
+  summary?: string
+  pros: string[]
+  considerations: string[]
+  note?: string
+  smallWardrobe: boolean
+  cached: boolean
+}
+
+/** Authenticated advice request. Takes only the saved item id; everything else is server-side. */
+export const requestShoppingAdvice = makeFunctionReference<
+  "action",
+  { itemId: string },
+  ShoppingAdvice
+>("shoppingAdvice:analyze")
+
+export type AdvicePhase = "idle" | "analyzing" | "ready" | "failed"
+
+/** Exact advice-button copy per phase. No scores, no percentages, no provider names. */
+export const ADVICE_COPY = {
+  adviceButton: "Should I buy this?",
+  analyzingButton: "Analyzing…",
+  failedButton: "Couldn't analyze. Try again."
+} as const
+
+/**
+ * Maps an advice failure onto safe UI copy. Server `appError` messages are user-facing by
+ * repository convention, so a structured server message passes through; everything else
+ * becomes the generic retry copy. Never surfaces stacks or provider internals.
+ */
+export function toAdviceFailureMessage(error: unknown): string {
+  const message = (error as { data?: { message?: unknown } } | null | undefined)?.data?.message
+  if (typeof message === "string" && message.trim().length > 0) return message
+  return "Couldn't analyze this item. Try again."
+}
+
+export type AdviceDeps = {
+  /** Authenticated `shoppingAdvice:analyze` wrapper. Item id only, always. */
+  requestAdvice: (args: { itemId: string }) => Promise<ShoppingAdvice>
+}
+
+/**
+ * One advice client per room: duplicate clicks for the same item share one in-flight
+ * analysis, and a settled request leaves no residue for the next garment. Analysis only:
+ * never saves, never uploads, never styles, never authorizes Live Mirror.
+ */
+export function createAdviceClient(deps: AdviceDeps) {
+  const inflight = new Map<string, Promise<ShoppingAdvice>>()
+
+  async function analyze(itemId: string): Promise<ShoppingAdvice> {
+    const running = inflight.get(itemId)
+    if (running) return running
+    const current = deps.requestAdvice({ itemId })
+    inflight.set(itemId, current)
+    try {
+      return await current
+    } finally {
+      if (inflight.get(itemId) === current) inflight.delete(itemId)
+    }
+  }
+
+  return { analyze }
+}
+
+export type AdviceClient = ReturnType<typeof createAdviceClient>
 
 export type StyledSuggestionItem = {
   _id: string
@@ -108,6 +210,15 @@ export function buildOutfitUrl(appUrl: string, outfitId: string): string {
   return `${appUrl.replace(/\/+$/, "")}/outfits/${outfitId}`
 }
 
+export type OwnPhase = "idle" | "marking" | "owned"
+
+/** Exact purchase-transition copy. Shown only in the room result area, never on hover pills. */
+export const OWN_COPY = {
+  ownButton: "I bought this",
+  markingButton: "Adding…",
+  ownedButton: "Added to your wardrobe ✓"
+} as const
+
 export type WardrobeSaveDeps = {
   /** Authenticated `uploads:generateUploadUrl` wrapper. No arguments, always. */
   generateUploadUrl: () => Promise<string>
@@ -123,10 +234,10 @@ export type SavePhase = "idle" | "saving" | "processing" | "ready" | "needs_cred
 
 /** Exact save-button copy per phase. The room renders `note` wherever a notice fits. */
 export const SAVE_COPY: Record<SavePhase, { button: string; note: string | null }> = {
-  idle: { button: "Save to wardrobe", note: null },
+  idle: { button: "Save item", note: null },
   saving: { button: "Saving…", note: null },
   processing: { button: "Processing…", note: null },
-  ready: { button: "Saved to wardrobe ✓", note: null },
+  ready: { button: "Saved ✓", note: null },
   needs_credits: {
     button: "Needs 1 credit to finish",
     note: "Saved, but you need a credit to finish adding it to your wardrobe."
