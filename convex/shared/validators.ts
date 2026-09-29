@@ -1,4 +1,4 @@
-import { v, type VLiteral, type VUnion } from "convex/values";
+import { v, type Infer, type VLiteral, type VUnion } from "convex/values";
 import { FEATURES, PLAN_IDS, RENDER_QUALITIES } from "./credits";
 import { JOB_STATUSES, JOB_TYPES, STEP_STATUSES } from "./jobs";
 import { CATEGORIES, FITS, FORMALITY, ITEM_STATUSES, PRESENTATIONS, SEASONS } from "./wardrobe";
@@ -89,3 +89,24 @@ export const vDetectedItem = v.object({
   ...vItemAttributes.fields,
   bbox: v.array(v.number()),
 });
+
+/**
+ * A styling suggestion as the model returns it: slot ids are plain strings because a
+ * hallucinating model must fail validation gracefully (dropped with problems) instead of
+ * tripping the `v.id` argument validator. `persistStylingSuggestions` re-verifies every id
+ * against the database before anything is written.
+ */
+export const vRawStylingSuggestion = v.object({
+  name: v.string(),
+  reasoning: v.string(),
+  slots: v.object({
+    outerwear: v.optional(v.string()),
+    top: v.optional(v.string()),
+    bottom: v.optional(v.string()),
+    dress: v.optional(v.string()),
+    shoes: v.optional(v.string()),
+    accessories: v.array(v.string()),
+  }),
+});
+
+export type RawStylingSuggestion = Infer<typeof vRawStylingSuggestion>;

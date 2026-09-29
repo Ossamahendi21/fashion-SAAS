@@ -43,6 +43,71 @@ export const shoppingImportStatus = makeFunctionReference<"query", { uploadId: s
   "shoppingImports:status"
 )
 
+// ---------- Style this item (Step 3C) ----------
+
+/** Authenticated styling request. Takes only the saved item id; everything else is server-side. */
+export const requestItemStyling = makeFunctionReference<
+  "action",
+  { itemId: string },
+  StylingResult
+>("styling:suggestOutfits")
+
+/** Keeps one proposal outfit. The web stylist UI uses this same mutation from its own cards. */
+export const saveOutfitProposal = makeFunctionReference<"mutation", { outfitId: string }, null>(
+  "threads:saveProposal"
+)
+
+export type StyledSuggestionItem = {
+  _id: string
+  name: string
+  category: string
+  url: string | null
+}
+
+export type StyledSuggestion = {
+  outfitId: string
+  name: string
+  reasoning: string
+  items: StyledSuggestionItem[]
+}
+
+export type StylingResult = {
+  threadId?: string
+  suggestions: StyledSuggestion[]
+  note?: string
+}
+
+export type StylePhase = "idle" | "styling" | "ready" | "failed"
+
+/** Exact style-button copy per phase. */
+export const STYLE_COPY = {
+  styleButton: "Style this item",
+  stylingButton: "Styling…",
+  failedButton: "Couldn't style. Try again.",
+  viewButton: "View in Fitcheck",
+  saveButton: "Save outfit",
+  savedButton: "Saved ✓"
+} as const
+
+/**
+ * Maps a styling failure onto safe UI copy. Server `appError` messages are user-facing by
+ * repository convention, so a structured server message passes through; everything else
+ * becomes the generic retry copy. Never surfaces stacks or provider internals.
+ */
+export function toStyleFailureMessage(error: unknown): string {
+  const message = (error as { data?: { message?: unknown } } | null | undefined)?.data?.message
+  if (typeof message === "string" && message.trim().length > 0) return message
+  return "Couldn't style this item. Try again."
+}
+
+/**
+ * Web handoff URL for one proposal outfit. Carries only the opaque outfit id — never a JWT,
+ * never wardrobe data, never a prompt.
+ */
+export function buildOutfitUrl(appUrl: string, outfitId: string): string {
+  return `${appUrl.replace(/\/+$/, "")}/outfits/${outfitId}`
+}
+
 export type WardrobeSaveDeps = {
   /** Authenticated `uploads:generateUploadUrl` wrapper. No arguments, always. */
   generateUploadUrl: () => Promise<string>

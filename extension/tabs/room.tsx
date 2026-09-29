@@ -41,17 +41,25 @@ import {
   takeProviderConnection
 } from "../lib/freeze"
 import {
+  buildOutfitUrl,
   consumeCapability,
   createWardrobeSaver,
   generateShoppingUploadUrl,
   postBlobToConvex,
   registerShoppingImport,
   parseGarmentMessage,
+  requestItemStyling,
   SAVE_COPY,
+  saveOutfitProposal,
   saveRemoteGarment,
   shoppingImportStatus,
+  STYLE_COPY,
   toSaveFailureMessage,
+  toStyleFailureMessage,
   type SavePhase,
+  type StyledSuggestion,
+  type StylePhase,
+  type StylingResult,
   type WardrobeSaveDeps
 } from "../lib/wardrobe-save"
 import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
@@ -184,6 +192,10 @@ function RoomWithAuth() {
     }),
     [convex, generateUploadUrl, registerImport]
   )
+  // Style-this-item: one authenticated styling request per click, plus proposal saves.
+  // Never authorizes Live Mirror, never touches the camera.
+  const styleItemAction = useAction(requestItemStyling)
+  const saveOutfitAction = useMutation(saveOutfitProposal)
   return (
     <Room
       authStatus={status}
@@ -191,16 +203,20 @@ function RoomWithAuth() {
       refreshBilling={() => refreshBillingAction({})}
       loadQuotaStatus={loadQuotaStatus}
       wardrobeSave={wardrobeSave}
+      requestStyling={(args) => styleItemAction(args)}
+      saveOutfitProposal={(args) => saveOutfitAction(args)}
     />
   )
 }
 
-function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave }: {
+function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
   refreshBilling?: () => Promise<unknown>
   loadQuotaStatus?: () => Promise<LiveMirrorStatus>
   wardrobeSave: WardrobeSaveDeps
+  requestStyling: (args: { itemId: string }) => Promise<StylingResult>
+  saveOutfitProposal: (args: { outfitId: string }) => Promise<null>
 }) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -237,6 +253,18 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
   const [saveState, setSaveState] = useState<{ garmentId: number; clientImportId: string; phase: SavePhase } | null>(null)
   const saveStateRef = useRef<typeof saveState>(null)
   saveStateRef.current = saveState
+  // Style-this-item state, scoped to the visible garment like the save UI: suggesting outfits
+  // around the saved wardrobe item. A stale completion never paints newer UI.
+  const [styleState, setStyleState] = useState<{
+    garmentId: number
+    itemId: string
+    phase: StylePhase
+    threadId?: string
+    suggestions?: StyledSuggestion[]
+    note?: string
+    savedOutfitIds?: string[]
+  } | null>(null)
+  const stylingRef = useRef(false)
   // Server authorization: one in-flight mint at a time, shared by concurrent starts.
   const authorizer = useMemo(() => createLiveMirrorAuthorizer(), [])
   // Wardrobe saver: single-flight per idempotency key, independent of Live Mirror entirely.
@@ -630,12 +658,80 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
       if (terminal === "failed") setNotice({ message: "Couldn't save. Try again." })
       if (terminal === "needs_credits") setNotice({ message: SAVE_COPY.needs_credits.note! })
       if (terminal === "no_item") setNotice({ message: SAVE_COPY.no_item.note! })
+      // A saved garment becomes styleable: resolve its wardrobe item id once, so Style this
+      // item needs no re-upload and no second registration.
+      if (terminal === "ready") {
+        try {
+          const status = await wardrobeSave.queryStatus(uploadId)
+          if (garmentRef.current?.id === id && status.state === "ready" && status.itemId) {
+            setStyleState({ garmentId: id, itemId: status.itemId, phase: "idle" })
+          }
+        } catch {
+          // Saving already succeeded; styling simply stays unavailable for this garment.
+        }
+      }
     } catch (error: any) {
       if (error?.message === "stopped" || garmentRef.current?.id !== id) return
       applyPhase("failed")
       setNotice({ message: toSaveFailureMessage(error) })
     }
-  }, [saver])
+  }, [saver, wardrobeSave])
+
+  /**
+   * Style the saved wardrobe item: one authenticated styling request per click through the
+   * existing single-flight guard, then compact suggestion cards. Never re-uploads, never
+   * registers again, never authorizes Live Mirror, never touches the camera. A stale
+   * completion (newer garment loaded meanwhile) resolves without painting or navigating.
+   */
+  const styleItem = useCallback(async () => {
+    if (stylingRef.current) return
+    const current = garmentRef.current
+    const state = styleState
+    if (!current || !state || state.garmentId !== current.id || !state.itemId) return
+    if (state.phase === "styling") return
+    const { garmentId, itemId } = state
+    stylingRef.current = true
+    setStyleState({ ...state, phase: "styling" })
+    try {
+      const result: StylingResult = await requestStyling({ itemId })
+      if (garmentRef.current?.id !== garmentId) return
+      setStyleState({
+        garmentId,
+        itemId,
+        phase: "ready",
+        ...(result.threadId ? { threadId: result.threadId } : {}),
+        suggestions: result.suggestions,
+        ...(result.note ? { note: result.note } : {})
+      })
+    } catch (error: any) {
+      if (garmentRef.current?.id !== garmentId) return
+      setStyleState({ ...state, phase: "failed" })
+      setNotice({ message: toStyleFailureMessage(error) })
+    } finally {
+      stylingRef.current = false
+    }
+  }, [requestStyling, styleState])
+
+  /** Keeps one proposal outfit: the web stylist UI saves through this same mutation. */
+  const saveSuggestionOutfit = useCallback(async (outfitId: string) => {
+    const state = styleState
+    if (!state || state.phase !== "ready") return
+    try {
+      await saveOutfitProposal({ outfitId })
+      if (styleState?.garmentId === state.garmentId) {
+        setStyleState({ ...state, savedOutfitIds: [...(state.savedOutfitIds ?? []), outfitId] })
+      }
+    } catch (error: any) {
+      setNotice({ message: toStyleFailureMessage(error) })
+    }
+  }, [saveOutfitProposal, styleState])
+
+  /** Opens one proposal outfit in Fitcheck. The id is opaque; no JWT, data, or prompt travels. */
+  const viewOutfit = useCallback((outfitId: string) => {
+    const state = styleState
+    if (!state || state.garmentId !== garmentRef.current?.id) return
+    void chrome.tabs.create({ url: buildOutfitUrl(getAuthConfig().fitcheckAppUrl, outfitId) })
+  }, [styleState])
 
   /** Entry point for every garment: load and normalise the image, then apply it. */
   const tryOn = useCallback(async (incoming: Incoming) => {
@@ -655,6 +751,7 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
       clientImportId
     })
     setSaveState({ garmentId: id, clientImportId, phase: "idle" })
+    setStyleState(null)
     if (phaseRef.current === "idle") void start()
     // The scan only runs once the user is framed; apply() starts it.
     try {
@@ -959,6 +1056,38 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
           <button className="save" onClick={() => void saveToWardrobe()} disabled={saveBusy || savePhase === "ready"} title="Save this garment to your Fitcheck wardrobe">
             {SAVE_COPY[savePhase].button}
           </button>
+        </div> : null}
+        {styleState && styleState.garmentId === garment.id && styleState.itemId ? <div className="style-row">
+          {styleState.phase === "ready" ? <div className="suggestions">
+            {styleState.note && styleState.suggestions?.length === 0 ? <p className="style-note">{styleState.note}</p> : null}
+            {(styleState.suggestions ?? []).map(suggestion => (
+              <div className="suggestion-card" key={suggestion.outfitId}>
+                <div className="suggestion-thumbs">
+                  {suggestion.items.filter(item => item.url).map(item => (
+                    <span className="suggestion-thumb" key={item._id} title={item.name}>
+                      <img src={item.url!} alt="" />
+                      {item._id === styleState.itemId && <i className="suggestion-pick">Your pick</i>}
+                    </span>
+                  ))}
+                </div>
+                <strong>{suggestion.name}</strong>
+                {suggestion.reasoning ? <span>{suggestion.reasoning}</span> : null}
+                <div className="suggestion-actions">
+                  <button className="link" onClick={() => viewOutfit(suggestion.outfitId)}>{STYLE_COPY.viewButton}</button>
+                  {styleState.savedOutfitIds?.includes(suggestion.outfitId)
+                    ? <span className="saved">{STYLE_COPY.savedButton}</span>
+                    : <button className="link" onClick={() => void saveSuggestionOutfit(suggestion.outfitId)}>{STYLE_COPY.saveButton}</button>}
+                </div>
+              </div>
+            ))}
+          </div> : <button
+            className="save"
+            onClick={() => void styleItem()}
+            disabled={styleState.phase === "styling"}
+            title="Get outfit ideas around this saved item"
+          >
+            {styleState.phase === "styling" ? STYLE_COPY.stylingButton : styleState.phase === "failed" ? STYLE_COPY.failedButton : STYLE_COPY.styleButton}
+          </button>}
         </div> : null}
       </div>}
 

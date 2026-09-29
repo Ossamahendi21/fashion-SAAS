@@ -86,6 +86,20 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .save { flex: 1; border: 1px solid var(--line); padding: 8px 10px; background: rgba(0, 0, 0, .35); color: #fff; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
 .save:not(:disabled):hover { border-color: var(--laser); color: var(--laser); }
 .save:disabled { opacity: .55; cursor: default; }
+/* Style-this-item suggestions live inside the garment card, below the save row. */
+.style-row { flex: 1 1 100%; display: flex; flex-direction: column; gap: 8px; }
+.suggestions { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
+.suggestion-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: rgba(0, 0, 0, .35); border: 1px solid rgba(255, 255, 255, .12); }
+.suggestion-card strong { font-size: 12px; }
+.suggestion-card span { color: rgba(255, 255, 255, .72); font-size: 11px; line-height: 1.4; }
+.suggestion-thumbs { display: flex; gap: 4px; }
+.suggestion-thumb { position: relative; flex: none; width: 44px; height: 44px; overflow: hidden; background: #fff; }
+.suggestion-thumb img { width: 100%; height: 100%; object-fit: contain; }
+.suggestion-pick { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, .65); color: var(--laser); font-size: 8px; font-style: normal; text-align: center; padding: 1px 0; }
+.suggestion-actions { display: flex; align-items: center; gap: 12px; }
+.suggestion-actions .link { border: 0; padding: 0; background: none; color: var(--laser); font-size: 11px; font-weight: 600; }
+.suggestion-actions .saved { color: #3ddc84; font-size: 11px; font-weight: 600; }
+.style-note { margin: 0; color: rgba(255, 255, 255, .8); font-size: 12px; line-height: 1.45; }
 
 /* ---------- Chrome ---------- */
 .toolbar { position: absolute; z-index: 8; right: 10px; top: 10px; display: flex; gap: 4px; }

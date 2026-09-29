@@ -11,11 +11,19 @@ import { appError, isAppError } from "../lib/errors";
 import { EMBEDDING_DIMENSIONS } from "../schema";
 import { LIMITS, type TokenUsage } from "../shared/credits";
 import { INGEST_STEPS } from "../shared/jobs";
-import { vDetectedItem } from "../shared/validators";
+import { vDetectedItem, vRawStylingSuggestion, type RawStylingSuggestion } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
 import { normalizeImageInput } from "./image_input";
-import { detectionInstructions, extractionPrompt, renderPrompt, shoppingDetectionInstructions } from "./prompts";
+import {
+  coerceStylingResponse,
+  detectionInstructions,
+  extractionPrompt,
+  renderPrompt,
+  shoppingDetectionInstructions,
+  stylingSuggestions,
+  type StylingWardrobeItem,
+} from "./prompts";
 
 /**
  * Every OpenAI call the app makes. Actions only: they read and write through `ai/pipeline.ts` so a
@@ -158,6 +166,80 @@ export const detectShoppingItem = internalAction({
         error: errorText(error),
       });
       throw error;
+    }
+  },
+});
+
+/**
+ * gpt-5-mini builds outfit suggestions around one saved wardrobe item. Text-only (no images),
+ * so it stays in the cheap detect-tier model. Failures surface as safe copy; malformed model
+ * output never reaches the caller.
+ */
+export const styleItemOutfits = internalAction({
+  args: {
+    item: v.object({
+      id: v.string(),
+      name: v.string(),
+      category: v.string(),
+      subcategory: v.string(),
+      colours: v.array(v.string()),
+      pattern: v.string(),
+      material: v.string(),
+      season: v.array(v.string()),
+      formality: v.string(),
+    }),
+    wardrobe: v.array(
+      v.object({
+        id: v.string(),
+        name: v.string(),
+        category: v.string(),
+        subcategory: v.string(),
+        colours: v.array(v.string()),
+        pattern: v.string(),
+        material: v.string(),
+        season: v.array(v.string()),
+        formality: v.string(),
+      }),
+    ),
+    presentation: v.string(),
+    fit: v.string(),
+    maxSuggestions: v.number(),
+  },
+  returns: v.object({
+    suggestions: v.array(vRawStylingSuggestion),
+    usage: v.object({ inputTextTokens: v.number(), outputTokens: v.number() }),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    suggestions: RawStylingSuggestion[];
+    usage: { inputTextTokens: number; outputTokens: number };
+  }> => {
+    try {
+      const wardrobe: StylingWardrobeItem[] = args.wardrobe;
+      const { instructions, schema } = stylingSuggestions({
+        item: { ...args.item },
+        wardrobe,
+        presentation: args.presentation,
+        fit: args.fit,
+        maxSuggestions: args.maxSuggestions,
+      });
+      const response = await openai().responses.create({
+        model: modelId(DETECT_MODEL),
+        input: [{ role: "user", content: [{ type: "input_text", text: instructions }] }],
+        text: { format: { type: "json_schema", name: "styling_suggestions", schema, strict: true } },
+      });
+      return {
+        suggestions: coerceStylingResponse(response.output_text, args.maxSuggestions),
+        usage: {
+          inputTextTokens: response.usage?.input_tokens ?? 0,
+          outputTokens: response.usage?.output_tokens ?? 0,
+        },
+      };
+    } catch (error) {
+      if (isAppError(error)) throw error;
+      throw appError("UPSTREAM_FAILED", "Styling is temporarily unavailable. Please try again.");
     }
   },
 });
