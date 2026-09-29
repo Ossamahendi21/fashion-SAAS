@@ -49,10 +49,10 @@ AI-Wardrobe-app-vercel-eve-clerk-nextjs/
 │   ├── hooks/message-cap.ts# Per-turn stylist rate-limit counting
 │   └── skills/             # colour-pairing.md, dress-codes.md (loaded on demand)
 ├── extension/              # OpenWear Fitting Room (Plasmo 0.90.5, SEPARATE npm package + lockfile)
-│   ├── background.ts       # Service worker: image fetch + Decart token minting (only key reader)
+│   ├── background.ts       # Service worker: garment/product image fetch only (no credentials)
 │   ├── content.tsx         # Content script: launcher, drag capture, room iframe host
-│   ├── popup.tsx           # Toolbar popup (open room / settings)
-│   ├── options.tsx         # Options page (API key, fastMode, sessionMinutes)
+│   ├── popup.tsx           # Toolbar popup (open room / settings / sign-in / allowance)
+│   ├── options.tsx         # Options page (local auto-freeze preference only)
 │   ├── tabs/room.tsx       # Fitting-room tab: webcam, framing, Decart session, drag-drop receive
 │   ├── lib/                # settings.ts, garment.ts, drop.ts, vision.ts (MediaPipe tracker)
 │   ├── vendor/             # decart-entry.ts shim → bundled decart-sdk.mjs (1.2 MB, gitignored);
@@ -71,7 +71,11 @@ AI-Wardrobe-app-vercel-eve-clerk-nextjs/
 |---|---|---|---|---|
 | Fitcheck web | Next.js → Convex React hooks | Clerk JWT (`convex` template) | Convex functions + workflows | Direct OpenAI **or** AI Gateway (config-selected) + Eve/Gateway stylist |
 | Eve stylist | `useEveAgent` chat stream | Clerk bearer + `x-fitcheck-thread-id` | Scoped `convex/agent.*` via `AGENT_SERVICE_KEY` | `openai/gpt-5.4-mini` via Gateway |
-| OpenWear ext | Plasmo extension pages | None (local Decart key) | None (Decart direct) | Decart Lucy realtime (`lucy-vton-latest`) |
+| OpenWear ext | Plasmo extension pages | Clerk JWT (`convex` template) via Sync Host | Convex `liveMirror:authorizeLiveMirror` (quota + server key) | Decart Lucy realtime (`lucy-vton-latest`) |
+
+> **Step 2E3: the legacy browser-stored Decart credential ("None / Decart direct" above) is
+> REMOVED.** The extension holds no permanent key; `background.ts` mints nothing; Fast Mode is
+> deleted. Historical findings below marked accordingly stay for context.
 
 ---
 
@@ -165,12 +169,12 @@ Plasmo MV3 extension, own `package.json`/`package-lock.json`, React 18, `@decart
 
 | Piece | File | Role |
 |---|---|---|
-| Background service worker | `extension/background.ts` | **Only code that reads the permanent Decart key.** Mints 60 s client tokens (`POST https://api.decart.ai/v1/client/tokens`); fetches/resolves public image URLs (incl. `og:image` fallback); install-time retro-inject; dev-reload gate |
+| Background service worker | `extension/background.ts` | **Holds no credentials.** Fetches/resolves public image URLs (incl. `og:image` fallback); install-time retro-inject; dev-reload gate. (Step 2E3 removed the `token`/`status`/`test-key` handlers and all provider calls.) |
 | Content script | `extension/content.tsx` | Shadow-DOM launcher (`<openwear-root>`), drag capture (capture-phase `dragstart`/`dragend`), transparent `.ow-drop-catcher` overlay, hosts room iframe (`tabs/room.html`, `allow="camera; autoplay; clipboard-write"`) |
-| Popup | `extension/popup.tsx` | Toolbar popup: key-presence check → open fitting room (with `scripting.executeScript` fallback + retry) or options |
-| Options page | `extension/options.tsx` | Stores `apiKey` (via `test-key` verification), `fastMode`, `sessionMinutes ∈ {2,5,10,20}` |
-| Fitting room | `extension/tabs/room.tsx` (~560 lines) | Webcam lifecycle, pose framing, garment receive, Decart session, drag-drop receive, snapshot download |
-| Settings store | `extension/lib/settings.ts` | `chrome.storage.local` `{apiKey, fastMode, sessionMinutes}` + defaults |
+| Popup | `extension/popup.tsx` | Toolbar popup: sign-in/out, open fitting room (with `scripting.executeScript` fallback + retry), read-only Live Mirror allowance |
+| Options page | `extension/options.tsx` | Local auto-freeze preference only (`autoFreezeSeconds`); no credentials, no Fast Mode |
+| Fitting room | `extension/tabs/room.tsx` | Webcam lifecycle, pose framing, garment receive, secure Decart session (server-minted token), Freeze & Inspect, drag-drop receive, snapshot download |
+| Settings store | `extension/lib/settings.ts` | `chrome.storage.local` `{autoFreezeSeconds}` only; legacy `apiKey`/`fastMode`/`sessionMinutes` values cleaned on load |
 | Garment helpers | `extension/lib/garment.ts` | `cleanName`, `buildPrompt` (≤48 chars: "Substitute the outfit with the complete outfit shown in the reference image[, including the …]"), `normalizeImage` (white-letterbox 768 px JPEG q0.92, preview q0.8) |
 | Drop parsing | `extension/lib/drop.ts` | File-first; else `text/html → img[src\|data-src]`, `text/uri-list`, `text/plain` first `https?://` |
 | Pose tracker | `extension/lib/vision.ts` | `PoseLandmarker` (CPU, `VIDEO`, 1 pose, segmentation masks), 256 px detect path, `coverRect`/`silhouetteBox`/`TARGET`/`guide()` instructions |
@@ -214,10 +218,18 @@ Exact files/functions per step:
 1. **Product page → launcher.** Shop page loads → `content.tsx:18-39` mounts `<openwear-root>` + shadow root + `style.css` → "AI fitting room" button (`content.tsx:170-177`) or toolbar `popup.tsx:8-29` → `tabs.sendMessage(tab.id, {type:"openwear:open"})` (with `scripting.executeScript` fallback) → `content.tsx:105-114` opens (`setOpen(true)`) and embeds room iframe `chrome.runtime.getURL("tabs/room.html")` (`content.tsx:44-45,185`).
 2. **Garment image acquire (drag-only; no DOM scraper).** `dragstart` capture (`content.tsx:117-134`): `composedPath()` → first anchor + first image (`querySelector("img")` fallback); URL = `bestImageUrl` (largest `srcset` candidate, Pinterest `i.pinimg.com` → `736x` rewrite, absolutized) or `link.href`; name = `productName` (alt/title → nearest `h1-h4/[class*=name|title]` within 6 ancestors → wide-image `h1`/`og:title` → link text). Drop on overlay (`content.tsx:137-148`) → `parseDrop` (`lib/drop.ts`: file-first, else HTML/URI-list/plain URL) → `postMessage({type:"openwear:garment", file|url, name})` to iframe (`content.tsx:102`, origin-targeted `ROOM_ORIGIN`).
 3. **Fitting room receive.** `room.tsx:322-330` (accepts `event.source === window.parent` only) → `tryOn()` (`room.tsx:289-308`): `garmentSeq++`, `cleanName`, status reading; idle → `start()`. Local file input (`room.tsx:547`, jpg/png/webp) and in-room drop (`room.tsx:464-470` via `parseDrop`) feed the same path.
-4. **Webcam start.** `start()` (`room.tsx:180-209`): key-presence check via `background("status")`; `getUserMedia({video:{width/height ideal from `models.realtime("lucy-vton-latest")`, frameRate, facingMode:"user"}, audio:false})`; `onended → stop("Camera disconnected.")`; `camera.play()`. Grant fallback page (`?grant`, `room.tsx:51-64`) requests `video:true` then stops tracks immediately.
+4. **Webcam start (with camera-compatibility fallback).** `start()`: signed-out users get the
+sign-in notice before any camera prompt; `acquireCamera()` tries the model capture size, then
+retries once with generic `{video:true}` on `NotFoundError`/`OverconstrainedError` (never on
+`NotAllowedError`); `onended → stop("Camera disconnected.")`. Grant fallback page (`?grant`)
+requests `video:true` then stops tracks immediately.
 5. **Pose framing (local, MediaPipe).** Lazy `createPoseTracker()` (`lib/vision.ts:11-22`: local `vision/` fileset, `pose_landmarker_lite.task`, CPU, `VIDEO`, 1 pose, masks) → `enterFraming()` → rAF loop (`room.tsx:337-439`, detect throttled ~15 fps while framing/scanning) → `guide()` instructions ("Step into the frame" / "Face the camera" / "Step back" / …) → 900 ms hold (`HOLD_MS`) → `markFramed()` → `phase ready`, waiters released.
 6. **Image prep.** `normalizeImage` (`lib/garment.ts:25-47`): remote URL → `background("image",{url})` → `background.ts:78-143` (validate, fetch ≤ 8 MB, `text/html` ≤ 2 MB → `previewImageUrl` scanning `og:image|og:image:secure_url|twitter:image` → re-fetch; allow jpg/png/webp/svg) → white-letterbox 768 px JPEG (q0.92; preview q0.8).
-7. **Decart authorization.** `connect()` (`room.tsx:212-214`) → `background("token")` → `createToken()` (`background.ts:52-61`): reads key **only here** (`apiKey()`, `background.ts:24-28` ← `chrome.storage.local`), `POST https://api.decart.ai/v1/client/tokens` with `X-API-KEY`, body `{expiresIn: 60, allowedModels: ["lucy-vton-latest"], constraints.realtime.maxSessionDuration: sessionMinutes×60}` → `{apiKey: 60 s client token, fastMode, sessionSeconds}`. `test-key` path mints with an unsaved override.
+7. **Decart authorization (server-side only).** `connect()` → `authorizeLiveMirror({})`
+(`convex/liveMirror.ts`): identity from the verified Clerk session; monthly session quota +
+fresh billing + daily operator cap enforced server-side; returns a short-lived token the room
+hands to `createDecartClient({apiKey: token})`. The browser holds no permanent key and chooses
+no model, duration, or speed. Missing auth configuration fails closed with a setup error.
 8. **Lucy realtime session.** `createDecartClient({apiKey: token, telemetry:false}).realtime.connect(stream, {model: models.realtime("lucy-vton-latest"), mirror:true, speed fast?, initialState:{prompt:{text: buildPrompt(name), enhance:true}, image}, onRemoteStream})` (`room.tsx:215-226`). Listeners: `connectionChange` (queue clear on `generating|connected`; `disconnected → stop`), `queuePosition`, `sessionEnded → stop`, `error → stop(friendly)` (`room.tsx:228-238`). Client countdown enforces `sessionSeconds` (`room.tsx:239-246`). Later garments → `connection.set({prompt, image, enhance:true})`; rename re-sends; `SETTLE_MS 900 (+500 first)` then reveal + laser-scan overlay masked by tracker mask.
 9. **Session termination.** `stop()` (`room.tsx:115-133`): `sessionRef++` (invalidates in-flight waits), `connection.disconnect()`, tracks stopped, `srcObject = null`, state reset, optional notice. Triggers: toolbar off, countdown expiry, `disconnected`/`sessionEnded`/`error`, `visibilitychange` hidden, `pagehide`, unmount. (No explicit server `terminate` call found — termination is `disconnect()` + timers; server `maxSessionDuration` is the backstop.)
 
@@ -257,11 +269,11 @@ All balance/ledger writes live in `convex/model/credits.ts` (nothing else touche
 
 | # | Finding | Location | Severity |
 |---|---|---|---|
-| S-1 | Permanent Decart key (`dct_…`) stored in `chrome.storage.local` plaintext, readable by any code in background/options context + devtools | `extension/lib/settings.ts:12-18`, `options.tsx:22-35`, `background.ts:24-28` | **High** — must move server-side before SaaS launch |
+| S-1 | **RESOLVED (Step 2E3).** Permanent Decart key was stored in `chrome.storage.local` plaintext. The credential, its storage, the background minting path and Fast Mode are all deleted; the only permanent key is the server-side `DECART_API_KEY` env variable. | `extension/lib/settings.ts`, `options.tsx`, `background.ts` (all rewritten) | Was **High** — closed |
 | S-2 | Mitigation exists but partial: only background reads the key; room/popup/content receive a 60 s scoped token (`expiresIn: 60`, `allowedModels`, server `maxSessionDuration`) | `background.ts:52-61`, `room.tsx:212-214`, `options.tsx:48` | Lowers blast radius; does not fix S-1 |
 | S-3 | Client-trusted session countdown (`token.sessionSeconds` interval) — server `maxSessionDuration` is the only real control (semantics UNCONFIRMED server-side) | `room.tsx:239-246` | Medium (metering) |
 | S-4 | `AGENT_SERVICE_KEY` correctly never leaves server/Eve runtime; no `NEXT_PUBLIC_` secret; Convex secrets set via dashboard/CLI, not `.env.local` | `.env.example`, `convex/lib/env.ts` | Good — preserve pattern for any Decart server key |
-| S-5 | `test-key` background path allows local key-guessing loop (requires local execution; no throttle found) | `background.ts:156` | Low |
+| S-5 | **RESOLVED (Step 2E3).** `test-key` background path (local key-guessing loop) deleted with the whole credential workflow. | `background.ts` (rewritten) | Was Low — closed |
 | S-6 | Room accepts `postMessage` on `source === window.parent` without `event.origin` check (relies on extension-origin iframe) | `room.tsx:322-330` vs `content.tsx:102` | Low-Medium (hardening) |
 | S-7 | Content-script message listener accepts any `openwear:open` runtime message without sender check | `content.tsx:105-114` | Low |
 | S-8 | Background message gate correctly rejects non-extension pages (`sender.url` must start with extension URL) | `background.ts:147-150` | Good — keep |
@@ -308,7 +320,9 @@ Reusable Fitcheck mechanisms (no new auth primitive needed):
 
 ## 11. Risks
 
-1. **Permanent Decart key in every browser (S-1).** Anyone with profile access exfiltrates unlimited realtime spend. Highest financial exposure in the combined product.
+1. **Permanent Decart key in every browser (S-1) — RESOLVED (Step 2E3).** Key deleted from
+   storage, background minting deleted, Fast Mode deleted. Only the server-side `DECART_API_KEY`
+   env variable remains.
 2. **Unmetered realtime usage.** No reservation/ledger/counter touches Decart minutes today; client countdown is advisory. SaaS margin has no guardrail on the most expensive operation.
 3. **No extension authN/authZ.** No identity, no entitlement check, no `requireUser` on any mirror path — subscription bypass is total until the authorizer lands.
 4. **Overly broad host permissions** (`https://*/*`, `http://*/*` + all-frames-off content script + single-file WAR). Least-privilege tightening will break arbitrary-shop fetch unless replaced by server-side fetch.

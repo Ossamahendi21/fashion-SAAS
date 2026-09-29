@@ -6,8 +6,8 @@
 //   instead of a custom token bridge. No raw JWTs are stored; no cookies are copied.
 // - ConvexProviderWithClerk binds the extension Clerk session to Convex with the SAME
 //   "convex" JWT template the web app uses. No new template, no backend change.
-// - getAuthConfig() throws clearly when public config is missing, so pages mount this
-//   provider only when isAuthConfigured(). The Decart-key path is untouched otherwise.
+// - getAuthConfig() throws clearly when public config is missing, so pages fail closed with
+//   a setup error when isAuthConfigured() is false. There is no unauthenticated mode.
 
 import { ClerkProvider, useAuth as useClerkAuth } from "@clerk/chrome-extension"
 import { ConvexReactClient } from "convex/react"

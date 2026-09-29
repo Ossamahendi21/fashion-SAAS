@@ -87,11 +87,39 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .toolbar { position: absolute; z-index: 8; right: 10px; top: 10px; display: flex; gap: 4px; }
 .toolbar button { display: grid; place-items: center; width: 34px; height: 34px; border: 0; background: rgba(0, 0, 0, .38); color: rgba(255, 255, 255, .85); backdrop-filter: blur(8px); }
 .toolbar button:hover { background: rgba(0, 0, 0, .6); color: #fff; }
+.toolbar button:disabled { opacity: .45; cursor: default; }
 .toolbar svg { width: 18px; height: 18px; }
+.toolbar .freeze { display: flex; align-items: center; gap: 7px; width: auto; height: 34px; padding: 0 12px; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.toolbar .freeze svg { width: 14px; height: 14px; }
+
+/* ---------- Frozen preview ---------- */
+.frozen { position: absolute; inset: 0; z-index: 2; }
+.frozen-frame { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.frozen-copy { position: absolute; z-index: 3; left: 12px; right: 12px; bottom: 44px; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-shadow: 0 2px 12px rgba(0, 0, 0, .7); }
+.frozen-badge { padding: 3px 9px; background: rgba(0, 0, 0, .55); border: 1px solid var(--line); color: var(--laser); font-size: 11px; font-weight: 700; letter-spacing: .18em; }
+.frozen-copy span:not(.frozen-badge):not(.frozen-loading) { max-width: 34ch; color: rgba(255, 255, 255, .82); font-size: 12px; line-height: 1.45; }
+.frozen-copy .primary { min-width: 0; margin-top: 4px; padding: 10px 18px; font-size: 13px; }
+.frozen-loading { display: flex; align-items: center; gap: 10px; color: rgba(255, 255, 255, .85); font-size: 12px; }
+.frozen-loading .spinner { width: 16px; height: 16px; border-color: rgba(255, 255, 255, .3); border-top-color: #fff; }
 .footer-note { position: absolute; z-index: 4; left: 16px; right: 16px; bottom: 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: rgba(255, 255, 255, .5); font-size: 10px; text-shadow: 0 1px 4px rgba(0, 0, 0, .6); pointer-events: none; }
 .footer-note strong { font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 400; letter-spacing: -.05em; color: rgba(255, 255, 255, .5); }
 .footer-note .timer { color: rgba(255, 255, 255, .8); font-variant-numeric: tabular-nums; }
-.banner { position: absolute; z-index: 9; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; background: rgba(0, 0, 0, .7); font-size: 12px; }
+.footer-note .quota { color: rgba(127, 255, 233, .85); font-variant-numeric: tabular-nums; }
+  .signin-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .signin-prompt span {
+    max-width: 30ch;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(232, 244, 255, 0.78);
+    text-align: center;
+  }
+  .banner { position: absolute; z-index: 9; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; background: rgba(0, 0, 0, .7); font-size: 12px; }
 .notice { position: absolute; z-index: 10; left: 12px; right: 12px; bottom: 104px; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; background: #fff; color: var(--ink); font-size: 13px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); animation: pop .3s ease both; }
 .notice span { flex: 1; }
 .notice button { flex: none; border: 0; padding: 7px 11px; background: var(--ink); color: #fff; font-size: 12px; }
@@ -105,7 +133,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 
 @media (max-width: 420px) {
   .garment-card { max-width: calc(100% - 24px); top: 54px; }
-  .footer-note span:not(.timer) { display: none; }
+  .footer-note span:not(.timer):not(.quota) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }

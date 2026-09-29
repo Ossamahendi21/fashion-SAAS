@@ -84,7 +84,7 @@ export function fitcheckSignInUrl(config: ExtensionAuthConfig): string {
   return `${config.fitcheckAppUrl}/sign-in`
 }
 
-/** Whether the extension can mount Clerk auth. False = Decart-key path only, unchanged. */
+/** Whether the extension can mount Clerk auth. False = fail closed with a setup error. */
 export function isAuthConfigured(env: Record<string, string | undefined> = BUILD_ENV): boolean {
   try { getAuthConfig(env); return true } catch { return false }
 }

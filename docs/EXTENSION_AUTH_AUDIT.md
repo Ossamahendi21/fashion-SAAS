@@ -50,10 +50,12 @@ below follows from them:
 - **Provisioning:** `StoreUser` (`src/components/providers/store-user.tsx`) calls
   `users.ensure` + `subscriptions.refresh` after Convex authenticates the session, so the
   `users` row and billing snapshot exist before paid gates run.
-- **`authorizeLiveMirror`:** no args → `getUserIdentity()` → `checkEntitlement(clerkId)` →
-  `assertFreshBilling` + `hasCurrentPlan` → short-lived Decart token. It is transport-agnostic:
-  any Convex client presenting a valid "convex"-template JWT for a paid, fresh-billing user
-  succeeds. **No backend change is needed for any extension approach that can present such a JWT.**
+- **`authorizeLiveMirror`:** no args → `getUserIdentity()` → `reserveLiveMirrorSession(clerkId)` →
+  fresh billing + current plan + monthly session quota + daily operator cap → short-lived Decart
+  token → `finalizeLiveMirrorSession(sessionId, authorized | provider_failed)`. It is
+  transport-agnostic: any Convex client presenting a valid "convex"-template JWT for a paid,
+  fresh-billing user with remaining sessions succeeds. **No backend change is needed for any
+  extension approach that can present such a JWT.**
 
 ## 2. Extension constraints
 
@@ -206,8 +208,9 @@ only after the tests in §13 pass. The background keeps its image-download role 
 5. On each Convex call, the client invokes getToken({ template: "convex", skipCache }).
 6. Clerk mints a short-lived JWT (issuer = CLERK_JWT_ISSUER_DOMAIN, aud/application = convex).
 7. Convex validates signature/issuer/aud identically to web traffic; no code path differs.
-8. authorizeLiveMirror: getUserIdentity() → subject = Clerk user id → checkEntitlement
-   (plan + fresh billing from the users row provisioned by users.ensure) → Decart token.
+8. authorizeLiveMirror: getUserIdentity() → subject = Clerk user id → reserveLiveMirrorSession
+    (plan + fresh billing + monthly quota + daily operator cap from server state) → Decart token →
+    finalizeLiveMirrorSession.
 9. Room uses the Decart token (60 s, lucy-vton-latest, server session cap) as today.
 10. Expiry/refresh: Convex rejects → client re-fetches with forceRefreshToken →
     Clerk refreshes or, if the session died, the UI returns to step 1.
@@ -323,6 +326,14 @@ and `extension/tests/live-mirror.test.mjs` (25 tests). The remaining gate is the
 a real Clerk + Convex dev deployment: see **`docs/LIVE_MIRROR_E2E_TEST.md`**, which carries the
 ten-case walkthrough, the error contract table, the accepted residual risks, and the Fast Mode
 provider-cost blocker that must be decided before the local Decart key is deleted.
+
+**Status (Step 2E3 — REMOVED):** the local Decart key is deleted. `background.ts` keeps only
+image fetching (`token`/`status`/`test-key` handlers gone); `chrome.storage.local` holds no
+credential (`apiKey`/`fastMode`/`sessionMinutes` removed, legacy values cleaned on load);
+`options.tsx` holds only the auto-freeze preference; the Fast Mode blocker is resolved by
+removal; the room, popup, and authorization module are secure-only with missing config failing
+closed. Regression coverage: `extension/tests/no-legacy-credentials.test.mjs`. The §13 matrix
+and Fast Mode blocker above are closed; the rest of this document is historical context.
 
 ---
 

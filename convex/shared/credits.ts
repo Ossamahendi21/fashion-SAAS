@@ -23,6 +23,8 @@ export type PlanDefinition = {
   priceUsd: number;
   /** Credits granted on every successful billing cycle (0 for free). */
   monthlyCredits: number;
+  /** Live Mirror sessions granted per billing cycle. Consumed only by a minted Decart token. */
+  monthlyLiveMirrorSessions: number;
   /** One-off credits granted when the user signs up (free only). */
   signupCredits: number;
   maxAvatars: number;
@@ -36,6 +38,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Free",
     priceUsd: 0,
     monthlyCredits: 0,
+    monthlyLiveMirrorSessions: 0,
     signupCredits: 25,
     maxAvatars: 1,
     features: [],
@@ -46,6 +49,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Pro",
     priceUsd: 9.99,
     monthlyCredits: 150,
+    monthlyLiveMirrorSessions: 2,
     signupCredits: 0,
     maxAvatars: 2,
     features: ["sharing"],
@@ -56,12 +60,16 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     name: "Plus",
     priceUsd: 19.99,
     monthlyCredits: 300,
+    monthlyLiveMirrorSessions: 4,
     signupCredits: 0,
     maxAvatars: 5,
     features: ["sharing", "hq_renders"],
     blurb: "300 credits a month, HQ renders, five avatars.",
   },
 };
+
+/** Operator safety counter for Live Mirror worst-case authorized seconds per UTC day. */
+export const LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_KEY = "live_mirror_authorized_seconds" as const;
 
 export const LIMITS = {
   dailyCreditCap: 150,

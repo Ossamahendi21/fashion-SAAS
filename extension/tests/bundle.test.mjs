@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { readFileSync, existsSync } from "node:fs"
+import { readFileSync, existsSync, readdirSync } from "node:fs"
 import { models } from "../vendor/decart-sdk.mjs"
 
 const root = new URL("../build/chrome-mv3-prod/", import.meta.url)
@@ -24,3 +24,37 @@ test("the packaged popup, content script, fitting room and vision files exist", 
   assert.ok(manifest.content_security_policy.extension_pages.includes("wasm-unsafe-eval"))
   assert.ok(!source.includes('"./v4/classic/external.js":!1'), "Parcel stripped Zod and would crash before mounting")
 })
+
+test("the production room ships no camera diagnostics", () => {
+  const tabs = new URL("tabs/", root)
+  const room = readFileSync(new URL(findRoomChunk(tabs), tabs), "utf8")
+  // The dev-only guard must be folded away, not merely short-circuited at runtime: the diagnostic
+  // body and its device-count helper must not survive into the shipped bundle. Only fragments
+  // unique to this code are asserted — "aspectRatio", "displaySurface" and "videoinput" all occur
+  // in the vendored React/Daily/Decart stack and would give false positives.
+  for (const fragment of ["OpenWear camera", "videoInputCount"]) {
+    assert.ok(!room.includes(fragment), `production bundle must not contain ${JSON.stringify(fragment)}`)
+  }
+  // The retry itself must ship: the fix has to be in the build users load.
+  assert.ok(room.includes("NotFoundError") && room.includes("OverconstrainedError"), "the constraint retry ships")
+  assert.ok(room.includes("No camera was available to OpenWear."), "the new NotFoundError copy ships")
+  assert.ok(room.includes("Your camera could not use the requested video settings."), "the new OverconstrainedError copy ships")
+})
+
+test("the production room ships the freeze UI and quota copy", () => {
+  const tabs = new URL("tabs/", root)
+  const room = readFileSync(new URL(findRoomChunk(tabs), tabs), "utf8")
+  for (const fragment of ["Freeze & inspect", "Frozen preview", "Go live again", "No Live Mirror sessions left this cycle."]) {
+    assert.ok(room.includes(fragment), `production bundle must contain ${JSON.stringify(fragment)}`)
+  }
+  // Quota display copy must never include provider internals.
+  assert.ok(!room.includes("authorized-seconds"), "no internal counter naming in shipped copy")
+})
+
+/** The room chunk carries a content hash; find it rather than hard-coding a name. */
+function findRoomChunk(tabs) {
+  for (const entry of readdirSync(tabs)) {
+    if (/^room\..+\.js$/.test(entry)) return entry
+  }
+  throw new Error("no room chunk found in the production build")
+}

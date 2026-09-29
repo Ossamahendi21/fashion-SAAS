@@ -1,10 +1,12 @@
-// Step 2C: secure Live Mirror token acquisition in the OpenWear fitting room.
+// Secure-only Live Mirror token acquisition in the OpenWear fitting room.
 //
+// Step 2E3 removed the legacy browser-key fallback completely: authorization always goes
+// through the server action, and missing auth configuration fails closed at the UI layer.
 // Pure logic tests against the real `lib/live-mirror.ts` with injected fakes. No browser, no
 // Chrome APIs, no Clerk, no Convex deployment and no Decart session: every provider boundary
-// is a stub. The contract under test is the security boundary itself — the secure path must
-// call the server action with no arguments, must never touch the legacy Decart key, and must
-// never let the browser raise the server's session cap or substitute the model.
+// is a stub. The contract under test is the security boundary itself — the room must call
+// the server action with no arguments, must never see a permanent key, and must never let
+// the browser raise the server's session cap or substitute the model.
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -26,22 +28,21 @@ const {
   toLiveMirrorFailure
 } = liveMirror
 
-const AUTHORIZATION = { token: "decart-client-token-abc", expiresIn: 60, sessionSeconds: 300, model: "lucy-vton-latest" }
+const AUTHORIZATION = { token: "decart-client-token-abc", expiresIn: 60, sessionSeconds: 300, model: "lucy-vton-latest", sessionId: "liveMirrorSessions-1", monthlyAllowanceSessions: 2, remainingSessions: 1 }
 const SIGNED_IN = { state: "signed-in", convexAuthenticated: true }
 const SIGNED_OUT = { state: "signed-out" }
 const LOADING = { state: "loading" }
 
 /** Records every call so a test can assert what did and did not cross the boundary. */
 function probe() {
-  const calls = { authorize: [], legacy: 0 }
+  const calls = { authorize: [] }
   return {
     calls,
-    authorize: async args => { calls.authorize.push(args); return { ...AUTHORIZATION } },
-    legacyToken: async () => { calls.legacy++; return { apiKey: "sk-decart-permanent", fastMode: false, sessionSeconds: 300 } }
+    authorize: async args => { calls.authorize.push(args); return { ...AUTHORIZATION } }
   }
 }
 
-const baseDeps = (overrides = {}) => ({ authEnabled: true, status: SIGNED_IN, localSessionSeconds: 300, fastMode: false, ...overrides })
+const baseDeps = (overrides = {}) => ({ status: SIGNED_IN, autoFreezeSeconds: 300, ...overrides })
 
 /** Builds the appError the Convex server throws, so failure mapping is tested against the real shape. */
 const convexError = code => Object.assign(new Error(`internal detail for ${code}`), { data: { code, message: `server copy for ${code}` } })
@@ -56,16 +57,14 @@ test("the action reference is the no-args server function", () => {
 
 test("authenticated + Convex connected calls authorizeLiveMirror with no arguments", async () => {
   const p = probe()
-  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken }))
+  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize }))
   assert.deepEqual(p.calls.authorize, [{}])
-  assert.equal(grant.source, "secure")
   assert.equal(grant.token, AUTHORIZATION.token)
-  assert.equal(p.calls.legacy, 0)
 })
 
 test("the secure path never sends identity, plan, model, duration or a Decart key", async () => {
   const p = probe()
-  await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken, localSessionSeconds: 9999 }))
+  await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, autoFreezeSeconds: 9999 }))
   const [args] = p.calls.authorize
   assert.deepEqual(Object.keys(args), [])
   const serialized = JSON.stringify(args)
@@ -75,35 +74,33 @@ test("the secure path never sends identity, plan, model, duration or a Decart ke
   assert.ok(!serialized.includes("sk-"), "action args must never carry key material")
 })
 
-test("auth configured + signed out: no legacy token request, no session, sign-in state shown", async () => {
+test("signed out: no session, sign-in state shown", async () => {
   const p = probe()
   await assert.rejects(
-    () => resolveLiveMirrorSession(baseDeps({ status: SIGNED_OUT, authorize: p.authorize, legacyToken: p.legacyToken })),
+    () => resolveLiveMirrorSession(baseDeps({ status: SIGNED_OUT, authorize: p.authorize })),
     error => error instanceof LiveMirrorError && error.failure === "UNAUTHENTICATED"
   )
-  assert.equal(p.calls.legacy, 0, "signed-out must never fall back to the browser key")
   assert.equal(p.calls.authorize.length, 0, "signed-out must not mint a token")
   assert.equal(liveMirrorMessage("UNAUTHENTICATED"), "Sign in to Fitcheck to use Live Mirror.")
 })
 
-test("Clerk still loading or Convex not yet connected: no token, no legacy fallback", async () => {
+test("Clerk still loading or Convex not yet connected: no token minted", async () => {
   for (const status of [LOADING, { state: "signed-in", convexAuthenticated: false }]) {
     const p = probe()
     await assert.rejects(
-      () => resolveLiveMirrorSession(baseDeps({ status, authorize: p.authorize, legacyToken: p.legacyToken })),
+      () => resolveLiveMirrorSession(baseDeps({ status, authorize: p.authorize })),
       error => error instanceof LiveMirrorError && error.failure === "PENDING"
     )
-    assert.equal(p.calls.legacy, 0)
     assert.equal(p.calls.authorize.length, 0)
   }
 })
 
 for (const code of ["FEATURE_LOCKED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM_FAILED", "UNAUTHENTICATED"]) {
-  test(`${code}: fails closed with safe copy and no browser-key fallback`, async () => {
+  test(`${code}: fails closed with safe copy`, async () => {
     const p = probe()
     const deny = async () => { throw convexError(code) }
     await assert.rejects(
-      () => resolveLiveMirrorSession(baseDeps({ authorize: deny, legacyToken: p.legacyToken })),
+      () => resolveLiveMirrorSession(baseDeps({ authorize: deny })),
       error => {
         assert.ok(error instanceof LiveMirrorError)
         assert.equal(error.failure, code)
@@ -114,7 +111,6 @@ for (const code of ["FEATURE_LOCKED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM
         return true
       }
     )
-    assert.equal(p.calls.legacy, 0, `${code} must never fall back to the browser key`)
   })
 }
 
@@ -122,10 +118,9 @@ test("an unknown server error becomes a generic safe message", async () => {
   const p = probe()
   const boom = async () => { throw new Error("ECONNREFUSED 10.0.0.7:3210 stack at authorizeLiveMirror") }
   await assert.rejects(
-    () => resolveLiveMirrorSession(baseDeps({ authorize: boom, legacyToken: p.legacyToken })),
+    () => resolveLiveMirrorSession(baseDeps({ authorize: boom })),
     error => error instanceof LiveMirrorError && error.failure === "UNKNOWN" && error.message === liveMirrorMessage("UNKNOWN")
   )
-  assert.equal(p.calls.legacy, 0)
 })
 
 test("the safe copy for each server decision says what to do, not what the provider said", () => {
@@ -150,15 +145,15 @@ test("failure mapping only trusts known server codes", () => {
 
 test("a successful authorization feeds the realtime flow with the server token", async () => {
   const p = probe()
-  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken }))
+  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize }))
   // This is the exact value the room hands to createDecartClient as apiKey.
   assert.equal(grant.token, "decart-client-token-abc")
-  assert.notEqual(grant.token, "sk-decart-permanent")
+  assert.ok(!grant.token.startsWith("sk_"), "a permanent key must never reach the room")
 })
 
 test("the returned model is used and the client cannot substitute another", async () => {
   const p = probe()
-  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken }))
+  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize }))
   assert.equal(grant.model, AUTHORIZATION.model)
   // A server-named model is resolved through the SDK catalogue; an unknown id fails closed.
   assert.equal(resolveRealtimeModel("lucy-vton-latest", id => ({ id })).id, "lucy-vton-latest")
@@ -167,30 +162,28 @@ test("the returned model is used and the client cannot substitute another", asyn
 })
 
 test("a malformed authorization payload is rejected instead of used", async () => {
-  for (const bad of [{ ...AUTHORIZATION, token: "" }, { ...AUTHORIZATION, model: "" }, { ...AUTHORIZATION, sessionSeconds: 0 }, { ...AUTHORIZATION, expiresIn: undefined }]) {
+  for (const bad of [{ ...AUTHORIZATION, token: "" }, { ...AUTHORIZATION, model: "" }, { ...AUTHORIZATION, sessionSeconds: 0 }, { ...AUTHORIZATION, expiresIn: undefined }, { ...AUTHORIZATION, sessionId: "" }, { ...AUTHORIZATION, monthlyAllowanceSessions: -1 }, { ...AUTHORIZATION, remainingSessions: undefined }]) {
     const p = probe()
     await assert.rejects(
-      () => resolveLiveMirrorSession(baseDeps({ authorize: async () => bad, legacyToken: p.legacyToken })),
+      () => resolveLiveMirrorSession(baseDeps({ authorize: async () => bad })),
       error => error instanceof LiveMirrorError && error.failure === "UNKNOWN"
     )
-    assert.equal(p.calls.legacy, 0)
   }
 })
 
-test("server sessionSeconds = 15 with a local request of 300 clamps the client timer to 15", async () => {
+test("server sessionSeconds = 15 with a local auto-freeze of 300 clamps the client timer to 15", async () => {
   const p = probe()
   const grant = await resolveLiveMirrorSession(baseDeps({
     authorize: async () => ({ ...AUTHORIZATION, sessionSeconds: 15 }),
-    legacyToken: p.legacyToken,
-    localSessionSeconds: 300
+    autoFreezeSeconds: 300
   }))
   assert.equal(grant.sessionSeconds, 15)
   assert.ok(grant.sessionSeconds <= 15)
 })
 
-test("server sessionSeconds = 300 with a local request of 60 keeps the local 60", async () => {
+test("server sessionSeconds = 300 with a local auto-freeze of 60 keeps the local 60", async () => {
   const p = probe()
-  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken, localSessionSeconds: 60 }))
+  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, autoFreezeSeconds: 60 }))
   assert.equal(grant.sessionSeconds, 60)
 })
 
@@ -214,8 +207,7 @@ test("duplicate start while authorization is pending mints exactly one token", a
   let release
   const gate = new Promise(resolve => { release = resolve })
   const deps = baseDeps({
-    authorize: async () => { calls.authorize++; await gate; return { ...AUTHORIZATION } },
-    legacyToken: async () => { calls.authorize++; return { apiKey: "sk-decart-permanent", fastMode: false, sessionSeconds: 300 } }
+    authorize: async () => { calls.authorize++; await gate; return { ...AUTHORIZATION } }
   })
   const attempts = [authorizer.acquire(deps), authorizer.acquire(deps), authorizer.acquire(deps)]
   assert.equal(authorizer.pending, true, "an in-flight authorization blocks a second mint")
@@ -230,40 +222,21 @@ test("a settled authorizer allows a deliberate manual retry", async () => {
   const authorizer = createLiveMirrorAuthorizer()
   const calls = { authorize: 0 }
   const failOnce = baseDeps({
-    authorize: async () => { calls.authorize++; if (calls.authorize === 1) throw convexError("UPSTREAM_FAILED"); return { ...AUTHORIZATION } },
-    legacyToken: async () => { throw new Error("legacy must not be used") }
+    authorize: async () => { calls.authorize++; if (calls.authorize === 1) throw convexError("UPSTREAM_FAILED"); return { ...AUTHORIZATION } }
   })
   await assert.rejects(() => authorizer.acquire(failOnce), LiveMirrorError)
   const grant = await authorizer.acquire(failOnce)
-  assert.equal(grant.source, "secure")
+  assert.equal(grant.token, AUTHORIZATION.token)
   assert.equal(calls.authorize, 2)
 })
 
-test("auth NOT configured: the legacy token path still works exactly as before", async () => {
+test("the secure grant carries no speed concept: Fast Mode is fully removed", async () => {
   const p = probe()
-  const grant = await resolveLiveMirrorSession({
-    authEnabled: false,
-    status: null,
-    authorize: p.authorize,
-    legacyToken: async () => { p.calls.legacy++; return { apiKey: "sk-decart-permanent", fastMode: true, sessionSeconds: 300 } },
-    localSessionSeconds: 600,
-    fastMode: false
-  })
-  assert.equal(grant.source, "legacy")
-  assert.equal(grant.token, "sk-decart-permanent")
-  // Legacy speed and limit come from the handler's own response, exactly as before.
-  assert.equal(grant.fastMode, true)
-  assert.equal(grant.sessionSeconds, 300, "the legacy handler owns its own session limit")
-  assert.equal(grant.model, null, "the legacy path keeps the room's own model")
-  assert.equal(p.calls.authorize.length, 0, "no server call without configured auth")
-  assert.equal(p.calls.legacy, 1)
-})
-
-test("Fast Mode survives the secure path as a local speed preference", async () => {
-  const p = probe()
-  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize, legacyToken: p.legacyToken, fastMode: true }))
-  assert.equal(grant.fastMode, true)
-  assert.equal(grant.source, "secure")
+  const grant = await resolveLiveMirrorSession(baseDeps({ authorize: p.authorize }))
+  assert.ok(!("fastMode" in grant), "no fastMode on the resolved grant")
+  assert.ok(!("source" in grant), "no legacy source discriminator on the resolved grant")
+  const room = readFileSync(fileURLToPath(new URL("../tabs/room.tsx", import.meta.url)), "utf8")
+  assert.ok(!room.includes("speed:"), "the room never sends a speed option to the SDK")
 })
 
 test("no secret name reaches the room's secure auth code", () => {
@@ -279,19 +252,22 @@ test("no secret name reaches the room's secure auth code", () => {
   }
 })
 
-test("the room reads session preferences without ever reading the stored Decart key", async () => {
-  const settings = readFileSync(fileURLToPath(new URL("../lib/settings.ts", import.meta.url)), "utf8")
-  const preferences = settings.slice(settings.indexOf("loadSessionPreferences"))
-  assert.ok(preferences.includes('"sessionMinutes", "fastMode"'), "preferences read only the non-secret keys")
-  const body = preferences.slice(0, preferences.indexOf("export function", 1) === -1 ? undefined : preferences.indexOf("export function", 1))
-  assert.ok(!body.includes("apiKey"), "the preference loader must not read apiKey")
+test("settings hold only the local auto-freeze preference, never a credential", async () => {
+  const raw = readFileSync(fileURLToPath(new URL("../lib/settings.ts", import.meta.url)), "utf8")
+  // Strip line comments (intentional documentation may name the removed concepts) and the
+  // one-way legacy-cleanup list itself; what remains must reference no credential workflow.
+  const code = raw.replace(/\/\/.*$/gm, "").replace(/LEGACY_SETTING_KEYS = \[.*?\]/, "")
+  for (const forbidden of ["apiKey", "fastMode", "sessionMinutes", "test-key"]) {
+    assert.ok(!code.includes(forbidden), `settings must not reference ${forbidden}`)
+  }
+  assert.ok(code.includes("autoFreezeSeconds"), "the local auto-freeze preference remains")
 })
 
-test("the room wires the secure authorizer and keeps the legacy handler reachable", () => {
+test("the room wires only the secure authorizer, with no legacy handler", () => {
   const room = readFileSync(fileURLToPath(new URL("../tabs/room.tsx", import.meta.url)), "utf8")
   assert.ok(room.includes("createLiveMirrorAuthorizer"), "room uses the single-flight authorizer")
   assert.ok(room.includes("liveMirrorAction"), "room calls the injected Convex action")
-  assert.ok(room.includes('background<Token>("token")'), "the legacy handler stays wired for unconfigured builds")
-  // The room must not reach into the permanent key itself.
-  assert.ok(!/loadSettings\(/.test(room), "the room must not load the full settings object")
+  assert.ok(!room.includes('background<Token>("token")'), "no background token minting from the room")
+  assert.ok(!room.includes("legacyToken"), "no legacy token callback in the room")
+  assert.ok(room.includes("loadSettings()"), "the room reads preferences through the credential-free settings loader")
 })

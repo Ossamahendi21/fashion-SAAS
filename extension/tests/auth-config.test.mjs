@@ -101,7 +101,7 @@ test("signed-out state never presents itself as authenticated", () => {
 
 test("no secret enters client auth code", () => {
   const dir = fileURLToPath(new URL("../lib/", import.meta.url))
-  for (const file of ["auth-config.ts", "auth-provider.tsx"]) {
+  for (const file of ["auth-config.ts", "auth-provider.tsx", "live-mirror.ts"]) {
     // Warning comments name the forbidden keys on purpose; strip them so the guard
     // checks actual code references, not the warnings themselves.
     const source = readFileSync(`${dir}${file}`, "utf8").replace(/\/\/.*$/gm, "")

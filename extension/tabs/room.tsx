@@ -9,7 +9,8 @@
 //       Later garments reuse the same connection via set().
 
 import { createDecartClient, models } from "../vendor/decart-sdk.mjs"
-import { useAction } from "convex/react"
+import { acquireCamera, stopStream } from "../lib/camera"
+import { useAction, useConvex } from "convex/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { fitcheckSignInUrl, getAuthConfig, isAuthConfigured, type ExtensionAuthStatus } from "../lib/auth-config"
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "../lib/auth-provider"
@@ -18,13 +19,28 @@ import { buildPrompt, cleanName, normalizeImage } from "../lib/garment"
 import {
   authorizeLiveMirror,
   createLiveMirrorAuthorizer,
+  liveMirrorStatus,
   LiveMirrorError,
   liveMirrorMessage,
+  quotaStatusCopy,
+  refreshSubscription,
   resolveRealtimeModel,
-  type LegacyToken,
-  type LiveMirrorAuthorization
+  type LiveMirrorAuthorization,
+  type LiveMirrorStatus
 } from "../lib/live-mirror"
-import { loadSessionPreferences, type SessionPreferences } from "../lib/settings"
+import {
+  canvasToFrozenFrame,
+  clearTimerRef,
+  defaultSnapshotDeps,
+  downloadSnapshot,
+  drawRemoteFrameToCanvas,
+  FROZEN_COPY,
+  hasUsableRemoteFrame,
+  releaseProviderConnection,
+  revokeFrozenPreview,
+  takeProviderConnection
+} from "../lib/freeze"
+import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
 import "./room.css"
 
@@ -32,11 +48,9 @@ type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
 type Phase = "idle" | "starting" | "framing" | "ready"
 type GarmentStatus = "reading" | "waiting" | "fitting" | "live" | "failed"
 type Garment = { id: number; name: string; preview: string; status: GarmentStatus }
-type Token = LegacyToken
-type NoticeAction = "settings" | "grant" | "restart" | "signin"
+type NoticeAction = "grant" | "restart" | "signin"
 type Notice = { message: string; action?: NoticeAction }
 const noticeButtonLabel: Record<NoticeAction, string> = {
-  settings: "Open settings",
   grant: "Allow camera",
   restart: "Start again",
   signin: "Sign in on Fitcheck"
@@ -53,9 +67,9 @@ const HOLD_MS = 900 // how long the user must stay in the outline before framing
 // The same page doubles as a full-tab "allow camera" screen when opened with ?grant (see GrantPage).
 const isGrantPage = new URLSearchParams(location.search).has("grant")
 
-// Auth state mounts only when public Clerk/Convex config is present; otherwise the room
-// is exactly the Decart-key UI it has always been.
-const authEnabled = isAuthConfigured()
+// The room always runs authenticated: RoomPage renders a setup error when public
+// Clerk/Convex config is missing, so by the time this module's Room mounts, the server-side
+// Live Mirror authorization is the only credential path.
 
 /** One-line Clerk + Convex state for the room. Rendered inside the provider only. */
 function RoomAuthBadge() {
@@ -70,7 +84,7 @@ function signInOnFitcheck() {
   void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })
 }
 
-/** Sends a request to background.ts, which holds the API key and fetches images. */
+/** Sends an image request to background.ts, which fetches garment images without site cookies. */
 async function background<T>(type: string, fields: Record<string, unknown> = {}): Promise<T> {
   const response: Reply<T> = await chrome.runtime.sendMessage({ type, ...fields })
   if (!response?.ok) throw new Error((response as { error?: string })?.error || "OpenWear is unavailable")
@@ -83,18 +97,18 @@ function friendly(error: any): Notice {
   if (error instanceof LiveMirrorError) {
     // A retry button is only offered where retrying can actually change the outcome.
     if (error.failure === "UNAUTHENTICATED") return { message: error.message, action: "signin" }
-    if (error.failure === "FEATURE_LOCKED" || error.failure === "SUBSCRIPTION_REFRESH_REQUIRED") return { message: error.message }
+    if (error.failure === "FEATURE_LOCKED" || error.failure === "LIVE_MIRROR_LIMIT_REACHED" || error.failure === "SUBSCRIPTION_REFRESH_REQUIRED") return { message: error.message }
     return { message: error.message, action: "restart" }
   }
   const message = String(error?.message || error || "")
-  if (message === "NO_KEY") return { message: "Add your Decart API key to start.", action: "settings" }
-  if (message === "KEY_REJECTED" || error?.code === "INVALID_API_KEY") return { message: "Decart rejected your API key. Check it in settings.", action: "settings" }
   if (error?.name === "NotAllowedError") return { message: "Camera access is blocked for OpenWear.", action: "grant" }
-  if (error?.name === "NotFoundError") return { message: "No camera found. Plug one in and try again." }
+  // Reached only after the generic retry also failed; see lib/camera.ts.
+  if (error?.name === "NotFoundError") return { message: "No camera was available to OpenWear." }
+  if (error?.name === "OverconstrainedError") return { message: "Your camera could not use the requested video settings." }
   if (error?.code?.startsWith?.("WEBRTC")) return { message: "Couldn't reach Decart's video servers. Check your network and try again.", action: "restart" }
-  // The legacy background worker answers with a short "CODE" or a short reason; anything else
+  // The background image worker answers with short reason strings; anything else
   // reaching here is an unexpected throw (a Convex hybrid stack trace, a Decart body, a JS
-  // TypeError) and must not be rendered. Legacy copy only.
+  // TypeError) and must not be rendered.
   if (!/^[A-Z_]{3,32}$/.test(message) && message.length <= 80) return { message: message || "Something went wrong. Try again.", action: "restart" }
   return { message: "Something went wrong. Try again.", action: "restart" }
 }
@@ -103,7 +117,7 @@ function friendly(error: any): Notice {
 function GrantPage() {
   const [state, setState] = useState<"ask" | "done" | "blocked">("ask")
   const ask = async () => {
-    try { (await navigator.mediaDevices.getUserMedia({ video: true })).getTracks().forEach(track => track.stop()); setState("done") }
+    try { stopStream(await navigator.mediaDevices.getUserMedia({ video: true })); setState("done") }
     catch { setState("blocked") }
   }
   return <main className="grant">
@@ -122,15 +136,28 @@ function GrantPage() {
 function RoomWithAuth() {
   const status = useExtensionAuthStatus()
   const liveMirrorAction = useAction(authorizeLiveMirror)
-  return <Room authStatus={status} liveMirrorAction={liveMirrorAction} />
+  const refreshBillingAction = useAction(refreshSubscription)
+  const convex = useConvex()
+  // Read-only allowance status. Never mints a token; loaded once per sign-in, refreshed after
+  // each successful authorization. Display only — authorizeLiveMirror stays authoritative.
+  const loadQuotaStatus = useCallback(() => convex.query(liveMirrorStatus, {}), [convex])
+  return (
+    <Room
+      authStatus={status}
+      liveMirrorAction={liveMirrorAction}
+      refreshBilling={() => refreshBillingAction({})}
+      loadQuotaStatus={loadQuotaStatus}
+    />
+  )
 }
 
-function Room({ authStatus, liveMirrorAction }: {
+function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
+  refreshBilling?: () => Promise<unknown>
+  loadQuotaStatus?: () => Promise<LiveMirrorStatus>
 }) {
   const [phase, setPhase] = useState<Phase>("idle")
-  const [hasKey, setHasKey] = useState<boolean | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [garment, setGarment] = useState<Garment | null>(null)
   const [guidance, setGuidance] = useState({ ok: false, message: "Step into the frame" })
@@ -143,9 +170,23 @@ function Room({ authStatus, liveMirrorAction }: {
   const [remaining, setRemaining] = useState(0)
   const [editingName, setEditingName] = useState(false)
   const [size, setSize] = useState({ width: 0, height: 0 })
-  const [preferences, setPreferences] = useState<SessionPreferences>({ sessionSeconds: 300, fastMode: false })
+  const [preferences, setPreferences] = useState({ autoFreezeSeconds: DEFAULT_SETTINGS.autoFreezeSeconds })
   const preferencesRef = useRef(preferences)
   preferencesRef.current = preferences
+  // Frozen preview: a local still of the last usable AI frame, shown after the provider
+  // connection is closed. The webcam, garment and room stay exactly as they were.
+  const [frozenPreview, setFrozenPreview] = useState<{ url: string; width: number; height: number } | null>(null)
+  const frozenPreviewRef = useRef<{ url: string; width: number; height: number } | null>(null)
+  frozenPreviewRef.current = frozenPreview
+  const frozenBlobRef = useRef<Blob | null>(null)
+  const freezingRef = useRef(false)
+  // A new authorization is in flight from frozen state ("Go live again").
+  const [reconnecting, setReconnecting] = useState(false)
+  const reconnectingRef = useRef(false)
+  // Informational quota display. Loaded without minting; authorizeLiveMirror stays authoritative.
+  const [quotaStatus, setQuotaStatus] = useState<LiveMirrorStatus | null>(null)
+  const loadQuotaStatusRef = useRef(loadQuotaStatus)
+  loadQuotaStatusRef.current = loadQuotaStatus
   // Server authorization: one in-flight mint at a time, shared by concurrent starts.
   const authorizer = useMemo(() => createLiveMirrorAuthorizer(), [])
 
@@ -181,35 +222,54 @@ function Room({ authStatus, liveMirrorAction }: {
 
   // ---------- Session lifecycle ----------
 
-  /** Ends everything: Decart connection, camera, timers and effects. Always safe to call. */
+  /**
+   * Realtime-only teardown, shared by freeze, auto-freeze and full stop so the provider is
+   * closed exactly one way: disconnect the Decart session, clear its timer, drop the remote
+   * video. The webcam, garment and frozen preview are untouched — use stop() to end those.
+   */
+  const closeProvider = useCallback(() => {
+    clearTimerRef(timerRef)
+    releaseProviderConnection(takeProviderConnection(connectionRef))
+    connectingRef.current = null
+    connectingForRef.current = 0
+    if (remoteRef.current) remoteRef.current.srcObject = null
+    remoteShownRef.current = false
+    setRemoteVisible(false); setConnection(""); setQueue(null); setRemaining(0)
+  }, [])
+
+  /** Releases the frozen preview URL. Only full stop (or a newer frame) calls this. */
+  const revokeFrozen = useCallback(() => {
+    revokeFrozenPreview(frozenPreviewRef.current, url => URL.revokeObjectURL(url))
+    frozenPreviewRef.current = null
+    frozenBlobRef.current = null
+    setFrozenPreview(null)
+  }, [])
+
+  /** Ends everything: Decart connection, camera, timers, frozen preview and effects. Always safe to call. */
   const stop = useCallback((reason?: Notice) => {
     sessionRef.current++
-    if (timerRef.current) clearInterval(timerRef.current)
-    timerRef.current = null
-    connectionRef.current?.disconnect()
-    connectionRef.current = null
-    connectingRef.current = null
-    streamRef.current?.getTracks().forEach(track => track.stop())
+    closeProvider()
+    stopStream(streamRef.current)
     streamRef.current = null
+    revokeFrozen()
+    freezingRef.current = false
+    reconnectingRef.current = false
+    setReconnecting(false)
     if (cameraRef.current) cameraRef.current.srcObject = null
-    if (remoteRef.current) remoteRef.current.srcObject = null
     framedRef.current = false
     framedWaitersRef.current = []
-    remoteShownRef.current = false
     scanRef.current = { mode: "off", start: 0, revealRemote: false }
     setRemoteVisible(false); setConnection(""); setQueue(null); setPhase("idle")
     setGarment(current => current && current.status !== "live" ? { ...current, status: "failed" } : current)
     if (reason) setNotice(reason)
-  }, [])
+  }, [closeProvider, revokeFrozen])
 
-  // Track the saved key and session preferences, and stop the (billed) session when the tab is
-  // hidden or the room closes. Preferences are read without the stored Decart key.
+  // Track the local auto-freeze preference, and stop the (billed) session when the tab is
+  // hidden or the room closes.
   useEffect(() => {
-    background<{ hasKey: boolean }>("status").then(value => setHasKey(value.hasKey)).catch(() => setHasKey(false))
-    loadSessionPreferences().then(setPreferences).catch(() => {})
+    loadSettings().then(setPreferences).catch(() => {})
     const onStorage = (changes: Record<string, chrome.storage.StorageChange>) => {
-      if (changes.apiKey) { setHasKey(!!String(changes.apiKey.newValue || "").trim()); setNotice(null) }
-      if (changes.sessionMinutes || changes.fastMode) void loadSessionPreferences().then(setPreferences).catch(() => {})
+      if (changes.autoFreezeSeconds) void loadSettings().then(setPreferences).catch(() => {})
     }
     chrome.storage.onChanged.addListener(onStorage)
     const onHidden = () => { if (document.hidden && streamRef.current) stop({ message: "Paused while you were away.", action: "restart" }) }
@@ -218,6 +278,21 @@ function Room({ authStatus, liveMirrorAction }: {
     window.addEventListener("pagehide", onUnload)
     return () => { chrome.storage.onChanged.removeListener(onStorage); document.removeEventListener("visibilitychange", onHidden); window.removeEventListener("pagehide", onUnload); stop() }
   }, [stop])
+
+  // Initial allowance display: one read-only status load once the account is connected. No
+  // polling, no token mint, no provider call. Any failure (including stale billing) leaves the
+  // display empty; authorization remains the authoritative decision.
+  useEffect(() => {
+    if (authStatus?.state !== "signed-in" || !authStatus.convexAuthenticated) {
+      setQuotaStatus(null)
+      return
+    }
+    const loader = loadQuotaStatusRef.current
+    if (!loader) return
+    let cancelled = false
+    loader().then(status => { if (!cancelled) setQuotaStatus(status) }).catch(() => { if (!cancelled) setQuotaStatus(null) })
+    return () => { cancelled = true }
+  }, [authStatus])
 
   useEffect(() => {
     const stage = stageRef.current
@@ -253,20 +328,14 @@ function Room({ authStatus, liveMirrorAction }: {
   const start = useCallback(async () => {
     if (phaseRef.current !== "idle") return
     setNotice(null)
-    // With auth configured, the server authorizer is mandatory, so a missing local key is fine.
-    if (!authEnabled && !hasKey) { setNotice({ message: "Add your Decart API key to start.", action: "settings" }); return }
     // Fail before the camera opens: a signed-out user has no way to obtain a token, so
     // granting webcam access and framing first would be a prompt for nothing.
-    if (authEnabled && authStatus?.state === "signed-out") { setNotice({ message: liveMirrorMessage("UNAUTHENTICATED"), action: "signin" }); return }
+    if (authStatus?.state === "signed-out") { setNotice({ message: liveMirrorMessage("UNAUTHENTICATED"), action: "signin" }); return }
     const session = ++sessionRef.current
     setPhase("starting")
     try {
-      const fps = typeof capture.fps === "number" ? { ideal: capture.fps } : capture.fps
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: capture.width }, height: { ideal: capture.height }, ...(fps ? { frameRate: fps } : {}), facingMode: "user" },
-        audio: false
-      })
-      if (session !== sessionRef.current) { stream.getTracks().forEach(track => track.stop()); return }
+      const stream = await acquireCamera(capture)
+      if (session !== sessionRef.current) { stopStream(stream); return }
       streamRef.current = stream
       stream.getVideoTracks()[0].onended = () => stop({ message: "Camera disconnected.", action: "restart" })
       const camera = cameraRef.current!
@@ -283,7 +352,63 @@ function Room({ authStatus, liveMirrorAction }: {
       if (session !== sessionRef.current) return
       stop(friendly(error))
     }
-  }, [authEnabled, authStatus, enterFraming, hasKey, markFramed, stop])
+  }, [authStatus, enterFraming, markFramed, stop])
+
+  /**
+   * Freeze & inspect: capture the latest usable AI frame, then terminate ONLY the realtime
+   * Decart connection. The webcam stream, garment, image and room stay exactly as they are,
+   * and the frozen still can be inspected locally for as long as the user likes at zero
+   * provider cost. No server call, no quota change, no refund — a minted session stays consumed.
+   *
+   * Returns true when a frozen preview is (or already is) on screen. Manual freezes require a
+   * usable frame up front; a timeout with no usable frame still closes the provider and shows
+   * safe copy instead of a fake blank image.
+   */
+  const freezeRealtime = useCallback(async (reason: "manual" | "timeout"): Promise<boolean> => {
+    if (freezingRef.current || frozenPreviewRef.current) return frozenPreviewRef.current !== null
+    if (!connectionRef.current) return false
+    const video = remoteRef.current
+    const usable = hasUsableRemoteFrame(video?.videoWidth, video?.videoHeight)
+    if (reason === "manual" && !usable) return false
+    // Draw synchronously, then close the provider immediately — blob encoding happens after.
+    const drawn = drawRemoteFrameToCanvas(video, (width, height) => {
+      const canvas = document.createElement("canvas")
+      canvas.width = width; canvas.height = height
+      return canvas
+    })
+    closeProvider()
+    const session = sessionRef.current
+    freezingRef.current = true
+    try {
+      if (!drawn) {
+        if (reason === "timeout") setNotice({ message: FROZEN_COPY.noPreview })
+        return false
+      }
+      const frozen = await canvasToFrozenFrame(drawn.canvas, drawn.width, drawn.height, {
+        createCanvas: (width, height) => {
+          const canvas = document.createElement("canvas")
+          canvas.width = width; canvas.height = height
+          return canvas
+        },
+        createObjectURL: blob => URL.createObjectURL(blob)
+      })
+      // A full stop landed mid-capture: drop the still instead of leaking it.
+      if (session !== sessionRef.current) {
+        if (frozen) URL.revokeObjectURL(frozen.url)
+        return false
+      }
+      if (!frozen) {
+        if (reason === "timeout") setNotice({ message: FROZEN_COPY.noPreview })
+        return false
+      }
+      frozenBlobRef.current = frozen.blob
+      setFrozenPreview({ url: frozen.url, width: frozen.width, height: frozen.height })
+      setNotice(null)
+      return true
+    } finally {
+      freezingRef.current = false
+    }
+  }, [closeProvider])
 
   /**
    * Opens the Decart realtime session with the first garment as its initial state.
@@ -292,12 +417,10 @@ function Room({ authStatus, liveMirrorAction }: {
   const connect = useCallback(async (image: Blob, prompt: string, session: number) => {
     // Single-flight: concurrent garment drops share one authorization, so one token is minted.
     const grant = await authorizer.acquire({
-      authEnabled,
       status: authStatus,
       authorize: liveMirrorAction,
-      legacyToken: () => background<Token>("token"),
-      localSessionSeconds: preferencesRef.current.sessionSeconds,
-      fastMode: preferencesRef.current.fastMode
+      refreshBilling,
+      autoFreezeSeconds: preferencesRef.current.autoFreezeSeconds
     })
     if (session !== sessionRef.current) throw Error("stopped")
     // Server-named model on the secure path. The SDK's id union is narrower than the string
@@ -310,7 +433,6 @@ function Room({ authStatus, liveMirrorAction }: {
     const realtime = await client.realtime.connect(streamRef.current!, {
       model,
       mirror: true, // desktop webcams rarely report facingMode, so mirror explicitly (Decart best practice)
-      ...(grant.fastMode ? { speed: "fast" } : {}),
       initialState: { prompt: { text: prompt, enhance: true }, image },
       onRemoteStream: (remote: MediaStream) => {
         if (session !== sessionRef.current || !remoteRef.current) return
@@ -330,16 +452,21 @@ function Room({ authStatus, liveMirrorAction }: {
     realtime.on("error", (error: any) => { if (session === sessionRef.current) stop(friendly(error)) })
     connectionRef.current = realtime
     setConnection(realtime.getConnectionState?.() || "connected")
-    // Realtime video is billed per second, so enforce the already-clamped session limit.
+    // The authorization just consumed one monthly session: refresh the informational display
+    // (no mint, no provider call) so the remaining count stays truthful.
+    void loadQuotaStatusRef.current?.().then(setQuotaStatus).catch(() => {})
+    // Realtime video is billed per second, so enforce the already-clamped session limit. At zero
+    // the provider work ends but the room does not: auto-freeze keeps the last usable AI frame
+    // on screen instead of throwing the user back to the empty intro.
     const started = Date.now()
     setRemaining(grant.sessionSeconds)
     timerRef.current = setInterval(() => {
       const left = Math.max(0, grant.sessionSeconds - Math.floor((Date.now() - started) / 1000))
       setRemaining(left)
-      if (!left) stop({ message: "Session limit reached. Start again whenever you like.", action: "restart" })
+      if (!left) void freezeRealtime("timeout")
     }, 1000)
     return realtime
-  }, [authEnabled, authStatus, liveMirrorAction, stop])
+  }, [authStatus, freezeRealtime, liveMirrorAction, refreshBilling, stop])
 
   // ---------- Garment pipeline ----------
 
@@ -374,10 +501,42 @@ function Room({ authStatus, liveMirrorAction }: {
     await waitForRemoteFrame()
     await new Promise(resolve => setTimeout(resolve, firstLook ? SETTLE_MS + 500 : SETTLE_MS))
     if (session !== sessionRef.current || garmentRef.current?.id !== id) return
+    // The new provider session is showing a usable frame: only now is the frozen still replaced,
+    // so there is never a blank screen between frozen and reconnecting. A denied authorization
+    // throws before this point and leaves the frozen preview exactly as it was.
+    if (frozenPreviewRef.current) revokeFrozen()
     scanRef.current = { mode: "reveal", start: performance.now(), revealRemote: firstLook }
     if (firstLook) { remoteShownRef.current = true; setRemoteVisible(true) }
     updateGarment(id, { status: "live" })
-  }, [connect, updateGarment, waitUntilFramed])
+  }, [connect, revokeFrozen, updateGarment, waitUntilFramed])
+
+  /**
+   * Go live again from a frozen preview. Always mints a NEW authorization through the existing
+   * single-flight authorizer — the previous token is never reused and a disconnected session is
+   * never restored locally — so a successful reconnect consumes a new monthly session exactly
+   * like any other authorization. The frozen still stays on screen until the first usable frame
+   * of the new session replaces it; a denial or provider error leaves it untouched.
+   */
+  const goLiveAgain = useCallback(async () => {
+    if (reconnectingRef.current || connectingRef.current) return
+    const current = garmentRef.current
+    if (!frozenPreviewRef.current || !current || !imageRef.current || !streamRef.current) {
+      setNotice({ message: "Turn on your camera — it applies next" })
+      return
+    }
+    reconnectingRef.current = true
+    setReconnecting(true)
+    setNotice(null)
+    try {
+      await apply(current.id, imageRef.current)
+    } catch (error: any) {
+      if (error?.message === "stopped") return
+      setNotice(friendly(error))
+    } finally {
+      reconnectingRef.current = false
+      setReconnecting(false)
+    }
+  }, [apply])
 
   /** Entry point for every garment: load and normalise the image, then apply it. */
   const tryOn = useCallback(async (incoming: Incoming) => {
@@ -534,8 +693,13 @@ function Room({ authStatus, liveMirrorAction }: {
 
   // ---------- Actions ----------
 
-  /** Saves the current AI frame as a JPEG. */
+  /** Saves the current AI frame as a JPEG: the frozen still when frozen, else the live video. */
   const snapshot = () => {
+    // Frozen first: downloading the still never restarts Decart.
+    if (frozenPreviewRef.current && frozenBlobRef.current) {
+      downloadSnapshot(frozenBlobRef.current, defaultSnapshotDeps())
+      return
+    }
     const video = remoteRef.current
     if (!video?.videoWidth) return
     const canvas = document.createElement("canvas")
@@ -543,14 +707,11 @@ function Room({ authStatus, liveMirrorAction }: {
     canvas.getContext("2d")!.drawImage(video, 0, 0)
     canvas.toBlob(blob => {
       if (!blob) return
-      const url = URL.createObjectURL(blob), anchor = document.createElement("a")
-      anchor.href = url; anchor.download = `openwear-${Date.now()}.jpg`; anchor.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      downloadSnapshot(blob, defaultSnapshotDeps())
     }, "image/jpeg", 0.95)
   }
 
   const onNoticeAction = () => {
-    if (notice?.action === "settings") chrome.runtime.openOptionsPage()
     if (notice?.action === "grant") window.open(chrome.runtime.getURL("tabs/room.html?grant=1"), "_blank")
     if (notice?.action === "signin") void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })
     if (notice?.action === "restart") { setNotice(null); void start() }
@@ -573,11 +734,26 @@ function Room({ authStatus, liveMirrorAction }: {
   }
   const live = remoteVisible && (connection === "generating" || connection === "connected")
   const cameraOn = phase !== "idle" && phase !== "starting"
+  // Informational only: authorizeLiveMirror stays authoritative for every new session.
+  const quotaCopy = quotaStatusCopy(quotaStatus)
+  // The Freeze control appears only once a usable AI frame is on screen (live implies the
+  // remote video already showed one), and can never fire twice.
+  const canFreeze = live && !frozenPreview && !reconnecting && !freezingRef.current
 
   return <div className={`room ${dragging ? "is-dragging" : ""}`} onDragEnter={e => { e.preventDefault(); setDragging(true) }} onDragOver={e => e.preventDefault()} onDragLeave={e => { if (e.currentTarget === e.target) setDragging(false) }} onDrop={onDrop}>
     <div className="stage" ref={stageRef}>
       <video className="camera" ref={cameraRef} muted playsInline />
       <video className={`remote ${remoteVisible ? "visible" : ""}`} ref={remoteRef} muted playsInline />
+      {frozenPreview && <div className="frozen">
+        <img className="frozen-frame" src={frozenPreview.url} alt={FROZEN_COPY.badge} />
+        <div className="frozen-copy">
+          <span className="frozen-badge">{FROZEN_COPY.badge}</span>
+          <span>{FROZEN_COPY.support}</span>
+          {reconnecting
+            ? <span className="frozen-loading"><span className="spinner" />{FROZEN_COPY.reconnecting}</span>
+            : <button className="primary" onClick={() => void goLiveAgain()} disabled={!garment}>{FROZEN_COPY.resume}</button>}
+        </div>
+      </div>}
       <canvas className="fx" ref={fxRef} />
 
       {phase === "framing" && size.width > 0 && <div className={`framing ${holding ? "holding" : ""}`}>
@@ -601,18 +777,14 @@ function Room({ authStatus, liveMirrorAction }: {
           <li><b>2</b>Line yourself up with the outline</li>
           <li><b>3</b>Drag any product photo in here</li>
         </ol>
-        {authEnabled && authStatus?.state === "signed-out"
+        {authStatus?.state === "signed-out"
           ? <div className="signin-prompt">
               <span>{liveMirrorMessage("UNAUTHENTICATED")}</span>
               <button className="primary" onClick={signInOnFitcheck}>Sign in on Fitcheck</button>
             </div>
-          : authEnabled
-            ? <button className="primary" onClick={() => void start()} disabled={authStatus?.state === "loading"}>Enable camera</button>
-            : hasKey === false
-              ? <button className="primary" onClick={() => chrome.runtime.openOptionsPage()}>Add your Decart API key</button>
-              : <button className="primary" onClick={() => void start()} disabled={hasKey === null}>Enable camera</button>}
-        <small>{!authEnabled && hasKey === false ? "Stored only in this browser. Never sent anywhere except Decart." : "Video streams to Decart only while this window is open."}</small>
-        {authEnabled && <RoomAuthBadge />}
+          : <button className="primary" onClick={() => void start()} disabled={authStatus?.state === "loading"}>Enable camera</button>}
+        <small>Video streams to Decart only while this window is open.</small>
+        <RoomAuthBadge />
       </div>}
 
       {phase === "starting" && <div className="intro loading"><div className="spinner" /><span>{visionReady ? "Opening camera…" : "Opening camera and loading the body guide…"}</span></div>}
@@ -628,7 +800,8 @@ function Room({ authStatus, liveMirrorAction }: {
       </div>}
 
       {cameraOn && <div className="toolbar">
-        {live && <button onClick={snapshot} title="Save a snapshot" aria-label="Save a snapshot"><svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4Z" /><circle cx="12" cy="13.5" r="3.3" /></svg></button>}
+        {(live || frozenPreview) && <button onClick={snapshot} title="Save a snapshot" aria-label="Save a snapshot"><svg viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4Z" /><circle cx="12" cy="13.5" r="3.3" /></svg></button>}
+        {live && <button className="freeze" onClick={() => void freezeRealtime("manual")} disabled={!canFreeze} title={FROZEN_COPY.freezeButton} aria-label={FROZEN_COPY.freezeAriaLabel}><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" /></svg><span>{FROZEN_COPY.freezeButton}</span></button>}
         <button onClick={() => chrome.runtime.openOptionsPage()} title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></svg></button>
         <button onClick={() => stop()} title="Turn camera off" aria-label="Turn camera off"><svg viewBox="0 0 24 24"><path d="M12 3v8" /><path d="M6.3 6.8a8 8 0 1 0 11.4 0" /></svg></button>
       </div>}
@@ -642,6 +815,7 @@ function Room({ authStatus, liveMirrorAction }: {
       {phase !== "framing" && <div className="footer-note">
         <strong>OpenWear</strong>
         <span>AI can make mistakes · Visual preview only</span>
+        {quotaCopy && <span className="quota">{quotaCopy}</span>}
         {live && remaining > 0 && <span className="timer">{Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}</span>}
       </div>}
       {connection === "reconnecting" && <div className="banner">Reconnecting…</div>}
@@ -651,10 +825,27 @@ function Room({ authStatus, liveMirrorAction }: {
   </div>
 }
 
+/** Shown when the public Clerk/Convex configuration is missing. Fails closed with setup
+ *  guidance; never exposes env values and never offers direct provider access. */
+function ConfigError() {
+  let detail = ""
+  try {
+    getAuthConfig()
+  } catch (error) {
+    detail = error instanceof Error ? error.message : ""
+  }
+  return <main className="grant">
+    <span className="kicker">OPENWEAR · SETUP</span>
+    <h1>Fitting room setup incomplete</h1>
+    <p>OpenWear needs its Fitcheck connection before it can start. Ask your Fitcheck administrator to configure the extension.</p>
+    {detail && <p>{detail}</p>}
+  </main>
+}
+
 export default function RoomPage() {
   if (isGrantPage) return <GrantPage />
-  // Without configured auth there is no Clerk/Convex provider, so the room runs on the
-  // legacy Decart-key path exactly as before this migration.
-  if (!authEnabled) return <Room authStatus={null} liveMirrorAction={async () => { throw new LiveMirrorError("PENDING", liveMirrorMessage("PENDING")) }} />
+  // The extension is a Fitcheck SaaS companion: without Clerk/Convex configuration there is
+  // no standalone mode. Step 2E3 removed the legacy browser-key path completely.
+  if (!isAuthConfigured()) return <ConfigError />
   return <ExtensionAuthProvider><RoomWithAuth /></ExtensionAuthProvider>
 }

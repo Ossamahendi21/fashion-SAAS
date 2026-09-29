@@ -1,8 +1,14 @@
 # Live Mirror — Secure Path End-to-End Test Matrix
 
+> **Step 2E3 status: the legacy browser-key path described below is REMOVED.** There is no
+> browser-stored Decart credential, no background `token`/`status`/`test-key` handler, no Fast
+> Mode, and no unconfigured-auth fallback. Every "no legacy fallback" expectation below is now
+> unconditional: the code paths no longer exist. The Fast Mode cost blocker (§Fast Mode) is
+> resolved by removal. Residual risk #5 is resolved the same way.
+
 Covers Step 2D: proving the secure Live Mirror path behaves correctly across account, entitlement,
-billing, provider and session states, and that the legacy browser-key path is only reachable when
-auth is not configured.
+billing, provider and session states. Step 2E3 deleted the legacy browser-key mode outright, so
+the "only reachable when auth is not configured" qualifier no longer applies to anything.
 
 Companion documents:
 - `docs/COMBINED_ARCHITECTURE_AUDIT.md` — current OpenWear Live Mirror architecture.
@@ -12,14 +18,14 @@ Companion documents:
 
 | # | Property | Where it is enforced | Test |
 |---|---|---|---|
-| 1 | No legacy fallback once auth is configured | `resolveLiveMirrorSession()` branches on `authEnabled` before any key lookup | `A`, `B`, `C`, `E`, `8` |
+| 1 | No legacy credential path at all (Step 2E3: fallback deleted, not just gated) | `resolveLiveMirrorSession()` takes no key input and knows no `legacyToken` | `A`, `B`, `C`, `E`, `8` |
 | 2 | No client-supplied identity, plan, model, duration or key | `AuthorizeLiveMirror` action is typed `Record<string, never>`; called as `deps.authorize({})` | `D`, `8` |
 | 3 | Server session cap is authoritative | `effectiveSessionSeconds()` is a hard `min` | `5` |
 | 4 | No cached authorization across sessions or account changes | `createLiveMirrorAuthorizer()` clears `inFlight` on settle | `4`, `F` |
 | 5 | Only server decisions are surfaced, with extension-authored copy | `toLiveMirrorFailure()` maps `error.data.code` to a fixed message | `error contract` |
 | 6 | Concurrent starts mint one token | `createLiveMirrorAuthorizer()` single-flight guard | `G` |
 | 7 | No permanent server secret in the extension | Server-only key reads in `convex/liveMirror/decart.ts` | `8` |
-| 8 | Legacy path unchanged when auth is unconfigured | `authEnabled === false` branch | `legacy` |
+| 8 | Legacy browser-key mode REMOVED (Step 2E3): no key storage, no background minting | deleted `token`/`status`/`test-key` handlers; `no-legacy-credentials.test.mjs` | — |
 
 Automated coverage: `extension/tests/live-mirror-secure.test.mjs` (35 tests) and
 `extension/tests/live-mirror.test.mjs` (25 tests).
@@ -43,8 +49,8 @@ contacts Clerk, Convex or Decart.**
 | transport / malformed payload | `UNKNOWN` | Live Mirror couldn't start. Please try again. | **Start again** |
 
 Server messages, Convex hybrid stack traces and Decart response bodies are never rendered: the
-mapping reads only `error.data.code` and returns copy authored in the extension. Legacy `NO_KEY` /
-`KEY_REJECTED` string handling is unchanged and still owned by the background worker.
+mapping reads only `error.data.code` and returns copy authored in the extension. The former
+`NO_KEY` / `KEY_REJECTED` key flows were deleted with the legacy path in Step 2E3.
 
 ## Manual matrix
 
@@ -61,8 +67,8 @@ so the Convex dev deployment is used.
 ### 2. Free plan
 - Sign in with a Clerk user on the free plan.
 - Enable the camera and enter Live Mirror.
-- **Expected:** `Live Mirror is available on a paid plan.` with **no** retry button. `browser.storage`
-  must not gain a `decartApiKey` entry, and the background `token` handler must not be called.
+- **Expected:** `Live Mirror is available on a paid plan.` with **no** retry button. No Decart
+  credential exists anywhere in the browser: no `chrome.storage` key, no background minting.
 
 ### 3. Paid plan, fresh billing
 - Subscribe via Stripe, wait for the webhook, and confirm the subscription shows in the Billing tab.
@@ -74,7 +80,7 @@ so the Convex dev deployment is used.
 ### 4. Stale billing
 - Set `billingCheckedAt` back, or stop the Stripe webhook, so `assertFreshBilling` throws.
 - Attempt Live Mirror.
-- **Expected:** the refresh-your-subscription notice, no retry button, no legacy fallback. After
+- **Expected:** the refresh-your-subscription notice, no retry button. After
   `subscriptions.refresh` completes, the next attempt succeeds.
 
 ### 5. Decart provider failure
@@ -98,8 +104,8 @@ so the Convex dev deployment is used.
 ### 8. Logout mid-session
 - Start a paid session, click Stop, then sign out of Clerk.
 - Start a new Live Mirror session.
-- **Expected:** signed-out notice with sign-in. No legacy fallback even though the browser may still
-  hold a previously configured key.
+- **Expected:** signed-out notice with sign-in. Stored legacy credentials, if any survive from
+  before Step 2E3, are cleaned from storage on load and never read.
 
 ### 9. Duplicate start
 - Double-click **Enable camera** (or trigger garment auto-start twice).
@@ -112,27 +118,19 @@ so the Convex dev deployment is used.
   never reuse the first session's settled token. Repeat after a **failed** attempt (e.g. case 5) —
   the next attempt must issue a new authorization rather than replaying the failure.
 
-## Fast Mode — behaviour and cost risk
+## Fast Mode — REMOVED in Step 2E3 (was: behaviour and cost risk)
 
-Fast Mode is a **local client-side preference** (`fastMode`, persisted in extension settings) passed
-to the Decart SDK as a realtime speed hint. It is deliberately unchanged in Step 2D:
+Fast Mode was a **local client-side preference** (`fastMode`, persisted in extension settings)
+passed to the Decart SDK as a realtime speed hint. Step 2E3 deleted it completely — settings
+field, SDK `speed` option, and all references — resolving the operator-cost blocker below by
+removal rather than by decision. The historical analysis is kept for context:
 
-- It is **not** a business rule, so it introduces no plan gate and no metering.
-- It is **not** part of the authorization call, so the server cannot currently see or deny it, and
-  enabling it cannot lengthen the server-authorized session length (test `6`).
-- Fast Mode **may materially increase Decart provider cost**, and because the flag is local, that
-  cost is currently borne by the operator rather than the user.
+- It was **not** a business rule, so it introduced no plan gate and no metering.
+- It was **not** part of the authorization call.
+- It **could materially increase Decart provider cost**, borne by the operator.
 
-**Blocker:** treat client-side Fast Mode as a release blocker for **removing the legacy key path and
-shipping to production**. Decide explicitly before that work:
-
-1. keep Fast Mode as an unlimited client-side speed hint (accepting unbounded operator cost), or
-2. make the server aware of it — include it in the authorization decision and have the server grant,
-   deny, or meter it.
-
-Do not ship the secure path to production or delete the legacy key path until this is decided. The
-current recommendation is to document the risk and defer the decision; the default remains enabled
-to preserve existing behaviour for users.
+**Blocker (RESOLVED):** the release blocker for removing the legacy key path is closed: both the
+legacy key path and Fast Mode are deleted. There is no longer a decision to make.
 
 ## Residual risks and accepted limitations
 
@@ -155,9 +153,8 @@ to preserve existing behaviour for users.
    the realtime connection is established; the room's session timer is bounded by the server's
    `sessionSeconds` instead. This is correct, but worth remembering when reasoning about token
    lifetime.
-5. **`background("status")` is still called on the secure path.** It returns only a boolean
-   (`hasKey`) used by the legacy gate and the settings copy. It is not a secret and was left in place
-   to keep the legacy path intact.
+5. **RESOLVED in Step 2E3.** `background("status")`, the `hasKey` gate, and the key-status
+   handler it called are all deleted. There is no legacy path left to keep intact.
 6. **Nested `ctx.runQuery()` error propagation is verified statically, not against a live
    deployment.** The Convex client SDK sources confirm `errorData` is forwarded as `.data` on both the
    sync and HTTP transports; confirming it end-to-end requires a deployed Convex dev environment, which

@@ -266,6 +266,7 @@ export async function reconcileSubscription(
   await ctx.db.patch(user._id, {
     plan,
     features: paid ? snapshot.features : [],
+    planPeriodStart: paid ? snapshot.periodStart : undefined,
     planPeriodEnd: paid ? snapshot.periodEnd : undefined,
     billingCheckedAt: snapshot.readStartedAt,
   });

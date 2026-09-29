@@ -26,6 +26,10 @@ export const vJobType = literals(JOB_TYPES);
 export const vJobStatus = literals(JOB_STATUSES);
 export const vStepStatus = literals(STEP_STATUSES);
 
+export const LIVE_MIRROR_SESSION_STATUSES = ["reserved", "authorized", "provider_failed"] as const;
+export type LiveMirrorSessionStatus = (typeof LIVE_MIRROR_SESSION_STATUSES)[number];
+export const vLiveMirrorSessionStatus = literals(LIVE_MIRROR_SESSION_STATUSES);
+
 export const vColours = v.object({
   primary: v.string(),
   secondary: v.array(v.string()),

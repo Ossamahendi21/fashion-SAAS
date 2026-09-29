@@ -44,6 +44,7 @@ const liveMirror = await import("../convex/liveMirror.ts");
 const { dayKey } = await import("../convex/shared/credits.ts");
 
 const now = Date.parse("2026-09-17T12:00:00Z");
+const periodStart = now - 24 * 60 * 60 * 1000;
 const periodEnd = now + 30 * 24 * 60 * 60 * 1000;
 const SERVER_KEY = "test-server-decart-key";
 const CLIENT_TOKEN = "dct_client_test_token";
@@ -52,20 +53,32 @@ const SESSION_SECONDS = 300;
 const errorCode = (code) => (error) => error?.data?.code === code;
 
 function fixture() {
-  const rows = new Map();
-  const put = (id, data) => rows.set(id, structuredClone({ ...data, _id: id }));
+  const tables = {
+    users: new Map(),
+    liveMirrorSessions: new Map(),
+    systemCounters: new Map(),
+  };
+  let nextId = 0;
+  const put = (table, id, data) => tables[table].set(id, structuredClone({ ...data, _id: id }));
+  const locate = (id) => {
+    for (const [table, rows] of Object.entries(tables)) {
+      if (rows.has(id)) return { table, row: rows.get(id) };
+    }
+    assert.fail(`Missing fixture row: ${id}`);
+  };
   const spend = { dayKey: dayKey(now), credits: 0 };
-  put("paid", {
+  put("users", "paid", {
     clerkId: "paid-sub",
     plan: "pro",
     planCredits: 100,
     packCredits: 0,
     features: ["sharing"],
+    planPeriodStart: periodStart,
     planPeriodEnd: periodEnd,
     billingCheckedAt: now - 1000,
     dailySpend: spend,
   });
-  put("free", {
+  put("users", "free", {
     clerkId: "free-sub",
     plan: "free",
     planCredits: 0,
@@ -73,33 +86,50 @@ function fixture() {
     features: [],
     dailySpend: spend,
   });
-  put("stale", {
+  put("users", "stale", {
     clerkId: "stale-sub",
     plan: "pro",
     planCredits: 100,
     packCredits: 0,
     features: ["sharing"],
+    planPeriodStart: periodStart,
     planPeriodEnd: periodEnd,
     billingCheckedAt: now - 61_000,
     dailySpend: spend,
   });
-  put("expired", {
+  put("users", "expired", {
     clerkId: "expired-sub",
     plan: "pro",
     planCredits: 100,
     packCredits: 0,
     features: ["sharing"],
+    planPeriodStart: periodStart,
     planPeriodEnd: now - 1000,
     billingCheckedAt: now - 1000,
     dailySpend: spend,
   });
   const db = {
     async get(id) {
-      return structuredClone(rows.get(id) ?? null);
+      return structuredClone(locate(id).row);
+    },
+    async patch(id, fields) {
+      const found = locate(id);
+      const next = { ...found.row };
+      for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined) delete next[key];
+        else next[key] = structuredClone(value);
+      }
+      tables[found.table].set(id, next);
+    },
+    async insert(table, fields) {
+      const id = `${table}-${++nextId}`;
+      put(table, id, fields);
+      return id;
     },
     query(table) {
-      assert.equal(table, "users");
       const filters = [];
+      const selected = () =>
+        [...tables[table].values()].filter((row) => filters.every(([field, value]) => row[field] === value));
       const query = {
         withIndex(_name, build) {
           const index = {
@@ -112,9 +142,12 @@ function fixture() {
           return query;
         },
         async unique() {
-          const found = [...rows.values()].filter((row) => filters.every(([field, value]) => row[field] === value));
+          const found = selected();
           assert.ok(found.length <= 1);
           return structuredClone(found[0] ?? null);
+        },
+        async collect() {
+          return structuredClone(selected());
         },
       };
       return query;
@@ -127,9 +160,15 @@ function fixture() {
         return subject ? { subject } : null;
       },
     },
-    async runQuery(_reference, args) {
-      calls.entitlementFor = args.clerkId;
-      return liveMirror.checkEntitlement._handler({ db }, args);
+    async runMutation(_reference, args) {
+      if (args && typeof args === "object" && "clerkId" in args) {
+        calls.entitlementFor = args.clerkId;
+        return liveMirror.reserveLiveMirrorSession._handler({ db }, args);
+      }
+      if (args && typeof args === "object" && "sessionId" in args) {
+        return liveMirror.finalizeLiveMirrorSession._handler({ db }, args);
+      }
+      throw new Error("Unexpected test mutation");
     },
   });
   return { db, calls, actionContext };
@@ -148,12 +187,14 @@ test.beforeEach(() => {
   mock.method(Date, "now", () => now);
   process.env.DECART_API_KEY = SERVER_KEY;
   process.env.LIVE_MIRROR_SESSION_MAX_SECONDS = String(SESSION_SECONDS);
+  process.env.LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_CAP = "1000000";
 });
 
 test.afterEach(() => {
   mock.restoreAll();
   delete process.env.DECART_API_KEY;
   delete process.env.LIVE_MIRROR_SESSION_MAX_SECONDS;
+  delete process.env.LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_CAP;
   delete globalThis.fetch;
 });
 
@@ -200,7 +241,7 @@ test("expired paid period is denied per the repository freshness rule", async ()
 test("unknown account is denied while it is still being set up", async () => {
   const f = fixture();
   await assert.rejects(
-    liveMirror.checkEntitlement._handler({ db: f.db }, { clerkId: "ghost-sub" }),
+    liveMirror.reserveLiveMirrorSession._handler({ db: f.db }, { clerkId: "ghost-sub" }),
     errorCode("UNAUTHENTICATED"),
   );
 });
@@ -209,12 +250,13 @@ test("paid user with fresh billing receives a scoped token via the exact Decart 
   const f = fixture();
   mockFetch(f.calls, okResponse);
   const result = await liveMirror.authorizeLiveMirror._handler(f.actionContext("paid-sub"), {});
-  assert.deepEqual(result, {
-    token: CLIENT_TOKEN,
-    expiresIn: 60,
-    sessionSeconds: SESSION_SECONDS,
-    model: "lucy-vton-latest",
-  });
+  assert.equal(result.token, CLIENT_TOKEN);
+  assert.equal(result.expiresIn, 60);
+  assert.equal(result.sessionSeconds, SESSION_SECONDS);
+  assert.equal(result.model, "lucy-vton-latest");
+  assert.equal(typeof result.sessionId, "string");
+  assert.equal(result.monthlyAllowanceSessions, 2);
+  assert.equal(result.remainingSessions, 1);
   assert.equal(f.calls.entitlementFor, "paid-sub");
   assert.equal(f.calls.fetch.length, 1);
   const [call] = f.calls.fetch;
@@ -252,7 +294,7 @@ test("the permanent server key is never present in the public response", async (
   const f = fixture();
   mockFetch(f.calls, okResponse);
   const result = await liveMirror.authorizeLiveMirror._handler(f.actionContext("paid-sub"), {});
-  assert.deepEqual(Object.keys(result).sort(), ["expiresIn", "model", "sessionSeconds", "token"]);
+  assert.deepEqual(Object.keys(result).sort(), ["expiresIn", "model", "monthlyAllowanceSessions", "remainingSessions", "sessionId", "sessionSeconds", "token"]);
   assert.ok(!JSON.stringify(result).includes(SERVER_KEY));
 });
 

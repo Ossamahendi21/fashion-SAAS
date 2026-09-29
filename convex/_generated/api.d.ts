@@ -33,6 +33,7 @@ import type * as model_credits from "../model/credits.js";
 import type * as model_demo_wardrobe from "../model/demo_wardrobe.js";
 import type * as model_items from "../model/items.js";
 import type * as model_jobs from "../model/jobs.js";
+import type * as model_liveMirror from "../model/liveMirror.js";
 import type * as model_outfits from "../model/outfits.js";
 import type * as model_renders from "../model/renders.js";
 import type * as model_stats from "../model/stats.js";
@@ -87,6 +88,7 @@ declare const fullApi: ApiFromModules<{
   "model/demo_wardrobe": typeof model_demo_wardrobe;
   "model/items": typeof model_items;
   "model/jobs": typeof model_jobs;
+  "model/liveMirror": typeof model_liveMirror;
   "model/outfits": typeof model_outfits;
   "model/renders": typeof model_renders;
   "model/stats": typeof model_stats;

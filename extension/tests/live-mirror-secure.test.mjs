@@ -45,7 +45,7 @@ const SIGNED_OUT = { state: "signed-out" }
 const LOADING = { state: "loading" }
 
 /** The exact contract the server action returns for a paid, fresh-billing user. */
-const GRANT = { token: "dc_live_eyJhbGciOi_FRESH_TOKEN", expiresIn: 60, sessionSeconds: 300, model: "lucy-vton-latest" }
+const GRANT = { token: "dc_live_eyJhbGciOi_FRESH_TOKEN", expiresIn: 60, sessionSeconds: 300, model: "lucy-vton-latest", sessionId: "liveMirrorSessions-1", monthlyAllowanceSessions: 2, remainingSessions: 1 }
 
 /**
  * Reproduces what the installed Convex client actually throws. `data` carries the server's
@@ -63,20 +63,10 @@ function convexError(code, serverMessage) {
   return error
 }
 
-/** A spy that fails the test if the legacy browser key is ever requested. */
-function noLegacy() {
-  return () => {
-    assert.fail("secure path must never request the legacy browser Decart key")
-  }
-}
-
 const secureDeps = (overrides = {}) => ({
-  authEnabled: true,
   status: SIGNED_IN,
   authorize: async () => ({ ...GRANT }),
-  legacyToken: noLegacy(),
-  localSessionSeconds: 300,
-  fastMode: false,
+  autoFreezeSeconds: 300,
   ...overrides
 })
 
@@ -99,44 +89,41 @@ function assertNoProviderLeak(message) {
 
 // ---------- A. Signed out ----------
 
-test("A: signed out never authorizes, never falls back, and asks for sign-in", async () => {
-  const calls = { authorize: 0, legacy: 0 }
+test("A: signed out never authorizes and asks for sign-in", async () => {
+  const calls = { authorize: 0 }
   await assertDenies(
     "UNAUTHENTICATED",
     resolveLiveMirrorSession(secureDeps({
       status: SIGNED_OUT,
-      authorize: async () => { calls.authorize++; return { ...GRANT } },
-      legacyToken: async () => { calls.legacy++; return { apiKey: "sk_live_LEAKED", fastMode: false, sessionSeconds: 300 } }
+      authorize: async () => { calls.authorize++; return { ...GRANT } }
     }))
   )
   assert.equal(calls.authorize, 0, "a signed-out user must not reach the server action")
-  assert.equal(calls.legacy, 0, "a signed-out user must not reach the browser key")
   assert.equal(liveMirrorMessage("UNAUTHENTICATED"), "Sign in to Fitcheck to use Live Mirror.")
 })
 
-test("A: Clerk still loading and Convex not yet attached are retryable, never a denial with a fallback", async () => {
+test("A: Clerk still loading and Convex not yet attached are retryable, never a denial", async () => {
   for (const status of [LOADING, CONVEX_PENDING, null]) {
     await assertDenies("PENDING", resolveLiveMirrorSession(secureDeps({ status })))
   }
 })
 
-test("A: a signed-out room can never be talked into the legacy path by a settled authorizer", async () => {
+test("A: a signed-out room is denied even after a settled authorizer", async () => {
   // An authorizer primed while signed in must not hand its grant to a later signed-out call.
   const authorizer = createLiveMirrorAuthorizer()
   const primed = await authorizer.acquire(secureDeps())
-  assert.equal(primed.source, "secure")
+  assert.equal(primed.token, GRANT.token)
   await assertDenies("UNAUTHENTICATED", authorizer.acquire(secureDeps({ status: SIGNED_OUT })))
 })
 
 // ---------- B. Free plan ----------
 
-test("B: a free user is denied FEATURE_LOCKED and never touches the browser key", async () => {
+test("B: a free user is denied FEATURE_LOCKED", async () => {
   const calls = { authorize: 0 }
   await assertDenies(
     "FEATURE_LOCKED",
     resolveLiveMirrorSession(secureDeps({
-      authorize: async () => { calls.authorize++; throw convexError("FEATURE_LOCKED", "Live Mirror requires a paid plan. Upgrade in Billing to continue.") },
-      legacyToken: async () => { throw new Error("legacy key must never be requested for a free user") }
+      authorize: async () => { calls.authorize++; throw convexError("FEATURE_LOCKED", "Live Mirror requires a paid plan. Upgrade in Billing to continue.") }
     }))
   )
   assert.equal(calls.authorize, 1, "the free user does reach the server, and the server denies")
@@ -149,18 +136,16 @@ test("B: a paid-plan upgrade between failures is honoured — a denial never lat
   const free = secureDeps({ authorize: async () => { throw convexError("FEATURE_LOCKED", "Live Mirror requires a paid plan.") } })
   await assertDenies("FEATURE_LOCKED", authorizer.acquire(free))
   const paid = await authorizer.acquire(secureDeps())
-  assert.equal(paid.source, "secure", "after upgrading, the next attempt succeeds")
-  assert.equal(paid.token, GRANT.token)
+  assert.equal(paid.token, GRANT.token, "after upgrading, the next attempt succeeds")
 })
 
 // ---------- C. Stale billing ----------
 
-test("C: stale billing is surfaced as SUBSCRIPTION_REFRESH_REQUIRED with no fallback", async () => {
+test("C: stale billing is surfaced as SUBSCRIPTION_REFRESH_REQUIRED", async () => {
   await assertDenies(
     "SUBSCRIPTION_REFRESH_REQUIRED",
     resolveLiveMirrorSession(secureDeps({
-      authorize: async () => { throw convexError("SUBSCRIPTION_REFRESH_REQUIRED", "Refresh your subscription before continuing.") },
-      legacyToken: async () => { throw new Error("legacy key must never be requested for stale billing") }
+      authorize: async () => { throw convexError("SUBSCRIPTION_REFRESH_REQUIRED", "Refresh your subscription before continuing.") }
     }))
   )
   assert.match(liveMirrorMessage("SUBSCRIPTION_REFRESH_REQUIRED"), /refresh/i)
@@ -172,7 +157,6 @@ test("C: a successful subscriptions.refresh clears the stale-billing denial", as
   const stale = secureDeps({ authorize: async () => { throw convexError("SUBSCRIPTION_REFRESH_REQUIRED", "Refresh your subscription before continuing.") } })
   await assertDenies("SUBSCRIPTION_REFRESH_REQUIRED", authorizer.acquire(stale))
   const fresh = await authorizer.acquire(secureDeps())
-  assert.equal(fresh.source, "secure")
   assert.equal(fresh.token, GRANT.token)
 })
 
@@ -180,7 +164,6 @@ test("C: a successful subscriptions.refresh clears the stale-billing denial", as
 
 test("D: a paid user gets a secure grant and the browser never sees the permanent key", async () => {
   const grant = await resolveLiveMirrorSession(secureDeps())
-  assert.equal(grant.source, "secure")
   assert.equal(grant.token, GRANT.token)
   assert.ok(!grant.token.startsWith("sk_"), "a permanent Decart key must never reach the room")
 })
@@ -200,19 +183,18 @@ test("D: extra fields on the server response are dropped, never forwarded to the
   const leaky = await resolveLiveMirrorSession(secureDeps({
     authorize: async () => ({ ...GRANT, apiKey: "sk_live_SERVER_LEAK", userId: "user_2abc", plan: "pro" })
   }))
-  assert.deepEqual(Object.keys(leaky).sort(), ["fastMode", "model", "sessionSeconds", "source", "token"])
+  assert.deepEqual(Object.keys(leaky).sort(), ["model", "monthlyAllowanceSessions", "remainingSessions", "sessionId", "sessionSeconds", "token"])
   assert.ok(!JSON.stringify(leaky).includes("sk_live_"), "no extra key material survives into the session")
   assert.ok(!JSON.stringify(leaky).includes("user_2abc"), "no identity leaks into the session")
 })
 
 // ---------- E. Provider failure ----------
 
-test("E: a Decart outage surfaces as temporary unavailability with no local-key fallback", async () => {
+test("E: a Decart outage surfaces as temporary unavailability", async () => {
   await assertDenies(
     "UPSTREAM_FAILED",
     resolveLiveMirrorSession(secureDeps({
-      authorize: async () => { throw convexError("UPSTREAM_FAILED", "Live Mirror is temporarily unavailable. Please try again.") },
-      legacyToken: async () => { throw new Error("a Decart outage must NOT silently use the browser key") }
+      authorize: async () => { throw convexError("UPSTREAM_FAILED", "Live Mirror is temporarily unavailable. Please try again.") }
     }))
   )
   assert.equal(liveMirrorMessage("UPSTREAM_FAILED"), "Live Mirror is temporarily unavailable. Please try again.")
@@ -225,7 +207,10 @@ test("E: network, malformed-payload and non-JSON failures all fail closed as gen
     async () => ({ ...GRANT, token: "" }),
     async () => ({ ...GRANT, sessionSeconds: 0 }),
     async () => ({ ...GRANT, model: "" }),
-    async () => ({ ...GRANT, expiresIn: Number.NaN })
+    async () => ({ ...GRANT, expiresIn: Number.NaN }),
+    async () => ({ ...GRANT, sessionId: "" }),
+    async () => ({ ...GRANT, monthlyAllowanceSessions: -1 }),
+    async () => ({ ...GRANT, remainingSessions: undefined })
   ]
   for (const authorize of cases) {
     await assertDenies("UNKNOWN", resolveLiveMirrorSession(secureDeps({ authorize })))
@@ -235,8 +220,8 @@ test("E: network, malformed-payload and non-JSON failures all fail closed as gen
 
 // ---------- Error contract ----------
 
-test("error contract: the four server decisions map from structured data, not message text", () => {
-  for (const code of ["UNAUTHENTICATED", "FEATURE_LOCKED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM_FAILED"]) {
+test("error contract: the five server decisions map from structured data, not message text", () => {
+  for (const code of ["UNAUTHENTICATED", "FEATURE_LOCKED", "LIVE_MIRROR_LIMIT_REACHED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM_FAILED"]) {
     // Same code, deliberately different server copy each time: the mapping must not depend on it.
     assert.equal(toLiveMirrorFailure(convexError(code, `arbitrary copy for ${code} at line 42`)), code)
   }
@@ -252,7 +237,7 @@ test("error contract: unknown codes and non-Convex errors collapse to UNKNOWN", 
 })
 
 test("error contract: no surfaced copy contains a stack trace, request id or provider detail", () => {
-  for (const failure of ["PENDING", "UNAUTHENTICATED", "FEATURE_LOCKED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM_FAILED", "UNKNOWN"]) {
+  for (const failure of ["PENDING", "UNAUTHENTICATED", "FEATURE_LOCKED", "LIVE_MIRROR_LIMIT_REACHED", "SUBSCRIPTION_REFRESH_REQUIRED", "UPSTREAM_FAILED", "UNKNOWN"]) {
     assertNoProviderLeak(liveMirrorMessage(failure))
   }
 })
@@ -262,7 +247,7 @@ test("error contract: no surfaced copy contains a stack trace, request id or pro
 test("F: after logout, the next authorization is denied for the new (signed-out) principal", async () => {
   const authorizer = createLiveMirrorAuthorizer()
   const paid = await authorizer.acquire(secureDeps())
-  assert.equal(paid.source, "secure")
+  assert.equal(paid.token, GRANT.token)
   // Clerk signs the user out; the room re-renders with a signed-out status.
   await assertDenies("UNAUTHENTICATED", authorizer.acquire(secureDeps({ status: SIGNED_OUT })))
 })
@@ -282,7 +267,6 @@ test("F: after an account switch, free to paid succeeds against the new principa
     authorize: async () => { throw convexError("FEATURE_LOCKED", "Live Mirror requires a paid plan.") }
   })))
   const grant = await authorizer.acquire(secureDeps())
-  assert.equal(grant.source, "secure")
   assert.equal(grant.token, GRANT.token)
 })
 
@@ -328,7 +312,7 @@ test("G: a manual retry after a failure requests a brand new authorization", asy
   assert.equal(authorizer.pending, false, "a failed authorization does not stay latched")
   const grant = await authorizer.acquire(flaky)
   assert.equal(calls.authorize, 2)
-  assert.equal(grant.source, "secure")
+  assert.equal(grant.token, GRANT.token)
 })
 
 // ---------- 4. Token lifetime / reuse ----------
@@ -382,19 +366,19 @@ test("4: a failed authorization leaves nothing cached for the next session", asy
 // ---------- 5. Server cap ----------
 
 test("5: local 300s with a 15s server grant stops the room at 15s", async () => {
-  const grant = await resolveLiveMirrorSession(secureDeps({ localSessionSeconds: 300, authorize: async () => ({ ...GRANT, sessionSeconds: 15 }) }))
+  const grant = await resolveLiveMirrorSession(secureDeps({ autoFreezeSeconds: 300, authorize: async () => ({ ...GRANT, sessionSeconds: 15 }) }))
   assert.equal(grant.sessionSeconds, 15)
 })
 
 test("5: local 60s with a 300s server grant uses 60s", async () => {
-  const grant = await resolveLiveMirrorSession(secureDeps({ localSessionSeconds: 60 }))
+  const grant = await resolveLiveMirrorSession(secureDeps({ autoFreezeSeconds: 60 }))
   assert.equal(grant.sessionSeconds, 60)
 })
 
 test("5: no local setting, however large, can raise the server grant", async () => {
   for (const local of [60, 300, 900, 3600, 86400, 1e9, Number.MAX_SAFE_INTEGER, -1, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
     const grant = await resolveLiveMirrorSession(secureDeps({
-      localSessionSeconds: local,
+      autoFreezeSeconds: local,
       authorize: async () => ({ ...GRANT, sessionSeconds: 15 })
     }))
     assert.ok(grant.sessionSeconds <= 15, `local ${local} escaped the 15s server cap (got ${grant.sessionSeconds})`)
@@ -410,42 +394,17 @@ test("5: the clamp is a hard min and never yields a zero or negative session", (
   assert.equal(effectiveSessionSeconds(1e9, 0), 1, "a nonsense server value floors at 1 second rather than granting a session")
 })
 
-// ---------- 6. Fast Mode: no new business rule ----------
+// ---------- 6. No speed concept: Fast Mode was removed with the legacy path ----------
 
-test("6: Fast Mode is passed through as a local preference and grants no extra time", async () => {
-  const fast = await resolveLiveMirrorSession(secureDeps({ fastMode: true, authorize: async () => ({ ...GRANT, sessionSeconds: 15 }) }))
-  assert.equal(fast.fastMode, true)
-  assert.equal(fast.sessionSeconds, 15, "Fast Mode must not lengthen the session the server authorized")
+test("6: the secure grant carries no speed setting at all", async () => {
+  const grant = await resolveLiveMirrorSession(secureDeps({ authorize: async () => ({ ...GRANT, sessionSeconds: 15 }) }))
+  assert.ok(!("fastMode" in grant), "no fastMode on the resolved grant")
+  assert.equal(grant.sessionSeconds, 15)
 })
 
-test("6: Fast Mode is not something the server can see or deny, and the client cannot gain a longer cap from it", async () => {
-  const calls = { authorize: 0 }
-  await resolveLiveMirrorSession(secureDeps({ fastMode: true, authorize: async () => { calls.authorize++; return { ...GRANT, sessionSeconds: 15 } } }))
-  assert.equal(calls.authorize, 1)
-  // The only per-session value the client sends is nothing at all: Fast Mode never reaches the
-  // authorization call, so it can neither buy a longer session nor be gated by the server today.
-  assert.equal(calls.authorize > 0, true)
-})
-
-// ---------- Legacy path is untouched ----------
-
-test("legacy: without configured auth the browser key path behaves exactly as it did", async () => {
-  const calls = { authorize: 0, legacy: 0 }
-  const grant = await resolveLiveMirrorSession({
-    authEnabled: false,
-    status: null,
-    authorize: async () => { calls.authorize++; return { ...GRANT } },
-    legacyToken: async () => { calls.legacy++; return { apiKey: "sk_live_browser_key", fastMode: true, sessionSeconds: 300 } },
-    localSessionSeconds: 600,
-    fastMode: false
-  })
-  assert.equal(grant.source, "legacy")
-  assert.equal(grant.token, "sk_live_browser_key")
-  assert.equal(grant.fastMode, true, "the legacy handler still owns its own speed preference")
-  assert.equal(grant.sessionSeconds, 300, "the legacy handler still owns its own session limit")
-  assert.equal(grant.model, null, "the legacy path keeps the room's own model")
-  assert.equal(calls.legacy, 1)
-  assert.equal(calls.authorize, 0, "no server call when auth is not configured")
+test("6: the room never sends a speed option to the SDK", async () => {
+  const room = readFileSync(fileURLToPath(new URL("../tabs/room.tsx", import.meta.url)), "utf8")
+  assert.ok(!room.includes("speed:"), "no speed option anywhere in the room")
 })
 
 // ---------- 8. Secret safety in the secure path ----------
@@ -463,21 +422,16 @@ test("8: no secure-path authored source references a server secret", () => {
   }
 })
 
-test("8: the room builds the Decart client from the resolved grant token, never from stored settings", () => {
+test("8: the room builds the Decart client from the resolved grant token only", () => {
   const room = readFileSync(fileURLToPath(new URL("../tabs/room.tsx", import.meta.url)), "utf8")
-  assert.ok(!/loadSettings\(/.test(room), "the room must not read the full settings object")
-  // Exactly one place constructs the SDK, and it takes the resolved grant token. On the secure
-  // path that token is the short-lived server grant; only the legacy path can hold a permanent key.
+  // Exactly one place constructs the SDK, and it takes the short-lived server grant token.
   const constructions = [...room.matchAll(/createDecartClient\(\{[^}]*\}\)/g)].map(match => match[0])
   assert.equal(constructions.length, 1, `expected one createDecartClient call, found ${constructions.length}`)
-  assert.match(constructions[0], /apiKey:\s*grant\.token/, "the SDK key must come from the resolved grant, not settings")
-  // The stored key value is only ever reduced to a presence boolean for the legacy gate.
-  for (const line of room.split("\n")) {
-    if (!line.includes("apiKey")) continue
-    assert.ok(/changes\.apiKey|apiKey:\s*grant\.token/.test(line), `room reads the stored key beyond a presence check: ${line.trim()}`)
-  }
-  // The legacy handler stays wired for unconfigured builds.
-  assert.ok(room.includes('background<Token>("token")'))
+  assert.match(constructions[0], /apiKey:\s*grant\.token/, "the SDK key must come from the resolved grant")
+  // No background token minting and no legacy callback anywhere in the room.
+  assert.ok(!room.includes('("token")'), "no background token request in the room")
+  assert.ok(!room.includes("legacyToken"), "no legacy token callback in the room")
+  assert.ok(!room.includes("test-key"), "no key-testing workflow in the room")
   // And the secure path is present.
   assert.ok(room.includes("createLiveMirrorAuthorizer") && room.includes("liveMirrorAction"))
 })

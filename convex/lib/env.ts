@@ -10,6 +10,8 @@ export const SERVER_ENV_KEYS = [
   "DECART_API_KEY",
   /** Per-session Live Mirror safety cap in seconds (strictly validated; missing/invalid fails closed). */
   "LIVE_MIRROR_SESSION_MAX_SECONDS",
+  /** Maximum total Live Mirror seconds that may be authorized across all users per UTC day. */
+  "LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_CAP",
   /** "1" enables the internal smoke-test functions in `convex/dev/smoke.ts`; unset everywhere but a scratch deployment. */
   "ALLOW_DEV_SMOKE",
 ] as const;

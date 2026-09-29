@@ -1,14 +1,15 @@
-// Toolbar popup: opens the fitting room on the current tab, or sends a new user to settings.
+// Toolbar popup: opens the fitting room on the current tab. The extension is a Fitcheck SaaS
+// companion: without public Clerk/Convex configuration it fails closed with a setup error.
+// There is no provider-key setup anymore — Step 2E3 removed the browser-stored Decart
+// credential completely.
 
 import { useClerk, useUser } from "@clerk/chrome-extension"
+import { useConvex } from "convex/react"
 import { useEffect, useState } from "react"
 import { getAuthConfig, fitcheckSignInUrl, isAuthConfigured } from "./lib/auth-config"
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "./lib/auth-provider"
+import { liveMirrorStatus, quotaStatusCopy } from "./lib/live-mirror"
 import "./popup.css"
-
-// Auth UI mounts only when public Clerk/Convex config is present; otherwise the popup
-// is exactly the Decart-key UI it has always been.
-const authEnabled = isAuthConfigured()
 
 /** Minimal Clerk state: loading / signed out (with web sign-in link) / signed in + Convex. */
 function AuthSection() {
@@ -27,6 +28,26 @@ function AuthSection() {
     <p className="popup-hint">Signed in as {identity} · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</p>
     <button className="popup-action secondary" onClick={() => void signOut()}><span>Sign out</span></button>
   </>
+}
+
+/** Informational allowance line. Read-only query: never mints, never decides. */
+function AllowanceLine() {
+  const convex = useConvex()
+  const status = useExtensionAuthStatus()
+  const [text, setText] = useState<string | null>(null)
+  useEffect(() => {
+    if (status.state !== "signed-in" || !status.convexAuthenticated) {
+      setText(null)
+      return
+    }
+    let cancelled = false
+    convex.query(liveMirrorStatus, {})
+      .then(value => { if (!cancelled) setText(quotaStatusCopy(value)) })
+      .catch(() => { if (!cancelled) setText(null) })
+    return () => { cancelled = true }
+  }, [convex, status])
+  if (!text) return null
+  return <p className="popup-hint">{text}</p>
 }
 
 /** Asks the tab's content script to open the room, injecting the script first if the tab
@@ -54,11 +75,24 @@ async function openFittingRoom() {
   }
 }
 
+/** Fails closed when the Fitcheck connection is not configured. Never exposes env values. */
+function SetupError() {
+  let detail = ""
+  try {
+    getAuthConfig()
+  } catch (error) {
+    detail = error instanceof Error ? error.message : ""
+  }
+  return <main className="popup">
+    <div className="eyebrow">VIRTUAL TRY-ON ·<br /> OPENWEAR</div>
+    <p className="popup-hint">The fitting room is not set up yet. Ask your Fitcheck administrator to configure the extension.</p>
+    {detail && <p className="popup-hint">{detail}</p>}
+  </main>
+}
+
 function Popup() {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
-  const [hasKey, setHasKey] = useState<boolean | null>(null)
-  useEffect(() => { chrome.storage.local.get("apiKey").then(value => setHasKey(!!String(value.apiKey || "").trim())) }, [])
   const open = async () => {
     if (busy) return
     setBusy(true); setError("")
@@ -68,25 +102,22 @@ function Popup() {
   }
   return <main className="popup">
     <div className="eyebrow">VIRTUAL TRY-ON ·<br /> OPENWEAR</div>
-    {hasKey === false
-      ? <button className="popup-action primary" onClick={() => chrome.runtime.openOptionsPage()}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M17 6l3 3M15 8l2 2" /></svg>
-          <span>Add your Decart key</span>
-        </button>
-      : <button className="popup-action primary" disabled={busy} onClick={() => void open()}>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>
-          <span>Open fitting room</span>
-        </button>}
+    <button className="popup-action primary" disabled={busy} onClick={() => void open()}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      <span>Open fitting room</span>
+    </button>
     <button className="popup-action secondary" onClick={() => chrome.runtime.openOptionsPage()}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></svg>
       <span>Settings</span>
     </button>
-    <p className="popup-hint">{hasKey ? "Key saved · open a shopping page, then drag any product photo in." : "One-time setup: paste your key from platform.decart.ai."}</p>
+    <p className="popup-hint">Open a shopping page, then drag any product photo in.</p>
     {error && <p role="alert" className="popup-error">{error}</p>}
-    {authEnabled && <AuthSection />}
+    <AuthSection />
+    <AllowanceLine />
   </main>
 }
 
 export default function PopupRoot() {
-  return authEnabled ? <ExtensionAuthProvider><Popup /></ExtensionAuthProvider> : <Popup />
+  if (!isAuthConfigured()) return <SetupError />
+  return <ExtensionAuthProvider><Popup /></ExtensionAuthProvider>
 }

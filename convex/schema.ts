@@ -8,6 +8,7 @@ import {
   vJobStatus,
   vJobStep,
   vJobType,
+  vLiveMirrorSessionStatus,
   vOutfitSlots,
   vPlanId,
   vPrefs,
@@ -15,6 +16,7 @@ import {
   vReservation,
   vTokenUsage,
 } from "./shared/validators";
+import { LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_KEY } from "./shared/credits";
 
 export const EMBEDDING_DIMENSIONS = 1536;
 
@@ -26,6 +28,7 @@ export default defineSchema({
     imageUrl: v.optional(v.string()),
     role: v.union(v.literal("user"), v.literal("admin")),
     plan: vPlanId,
+    planPeriodStart: v.optional(v.number()),
     planPeriodEnd: v.optional(v.number()),
     billingCheckedAt: v.optional(v.number()),
     features: v.array(vFeature),
@@ -230,9 +233,32 @@ export default defineSchema({
 
   systemCounters: defineTable({
     dayKey: v.string(),
-    key: v.union(v.literal("credits_reserved"), v.literal("users_total")),
+    key: v.union(
+      v.literal("credits_reserved"),
+      v.literal("users_total"),
+      v.literal(LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_KEY),
+    ),
     value: v.number(),
   }).index("by_day_key", ["dayKey", "key"]),
+
+  /**
+   * Live Mirror usage ledger. One row is reserved before Decart is called; provider failure
+   * moves it to `provider_failed` and releases quota, while a minted token keeps it consumed.
+   * Tokens, permanent keys, and Clerk JWTs are never stored here.
+   */
+  liveMirrorSessions: defineTable({
+    userId: v.id("users"),
+    plan: vPlanId,
+    periodStart: v.number(),
+    periodEnd: v.number(),
+    authorizedSeconds: v.number(),
+    model: v.string(),
+    status: vLiveMirrorSessionStatus,
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user_period", ["userId", "periodStart"])
+    .index("by_user_created", ["userId", "createdAt"]),
 
   usageCounters: defineTable({
     userId: v.id("users"),
