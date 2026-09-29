@@ -10,7 +10,7 @@
 
 import { createDecartClient, models } from "../vendor/decart-sdk.mjs"
 import { acquireCamera, stopStream } from "../lib/camera"
-import { useAction, useConvex } from "convex/react"
+import { useAction, useConvex, useMutation } from "convex/react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { fitcheckSignInUrl, getAuthConfig, isAuthConfigured, type ExtensionAuthStatus } from "../lib/auth-config"
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "../lib/auth-provider"
@@ -41,13 +41,35 @@ import {
   takeProviderConnection
 } from "../lib/freeze"
 import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
+import {
+  createWardrobeSaver,
+  generateShoppingUploadUrl,
+  postBlobToConvex,
+  registerShoppingImport,
+  SAVE_COPY,
+  shoppingImportStatus,
+  toSaveFailureMessage,
+  type SavePhase,
+  type WardrobeSaveDeps
+} from "../lib/wardrobe-save"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
 import "./room.css"
 
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
 type Phase = "idle" | "starting" | "framing" | "ready"
 type GarmentStatus = "reading" | "waiting" | "fitting" | "live" | "failed"
-type Garment = { id: number; name: string; preview: string; status: GarmentStatus }
+type Garment = {
+  id: number
+  name: string
+  preview: string
+  status: GarmentStatus
+  /** Original upload file name, or a fallback for URL-sourced garments. */
+  fileName: string
+  /** Canonical shop page the garment was dragged from, if any. Provenance only. */
+  sourcePageUrl?: string
+  /** Idempotency key for wardrobe saves of this garment. New garment, new id. */
+  clientImportId: string
+}
 type NoticeAction = "grant" | "restart" | "signin"
 type Notice = { message: string; action?: NoticeAction }
 const noticeButtonLabel: Record<NoticeAction, string> = {
@@ -141,21 +163,36 @@ function RoomWithAuth() {
   // Read-only allowance status. Never mints a token; loaded once per sign-in, refreshed after
   // each successful authorization. Display only — authorizeLiveMirror stays authoritative.
   const loadQuotaStatus = useCallback(() => convex.query(liveMirrorStatus, {}), [convex])
+  // Wardrobe saving: authenticated Convex storage + shopping imports. Independent of Live
+  // Mirror — saving never authorizes, never reads quota, never touches the camera.
+  const generateUploadUrl = useMutation(generateShoppingUploadUrl)
+  const registerImport = useMutation(registerShoppingImport)
+  const wardrobeSave = useMemo<WardrobeSaveDeps>(
+    () => ({
+      generateUploadUrl: () => generateUploadUrl({}),
+      postBlob: postBlobToConvex,
+      registerImport: (input) => registerImport(input),
+      queryStatus: (uploadId) => convex.query(shoppingImportStatus, { uploadId })
+    }),
+    [convex, generateUploadUrl, registerImport]
+  )
   return (
     <Room
       authStatus={status}
       liveMirrorAction={liveMirrorAction}
       refreshBilling={() => refreshBillingAction({})}
       loadQuotaStatus={loadQuotaStatus}
+      wardrobeSave={wardrobeSave}
     />
   )
 }
 
-function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }: {
+function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
   refreshBilling?: () => Promise<unknown>
   loadQuotaStatus?: () => Promise<LiveMirrorStatus>
+  wardrobeSave: WardrobeSaveDeps
 }) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -187,8 +224,15 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }:
   const [quotaStatus, setQuotaStatus] = useState<LiveMirrorStatus | null>(null)
   const loadQuotaStatusRef = useRef(loadQuotaStatus)
   loadQuotaStatusRef.current = loadQuotaStatus
+  // Wardrobe save UI, scoped to the current garment: a new garment always starts idle with a
+  // fresh idempotency key, and a stale save can never overwrite newer UI (see saveToWardrobe).
+  const [saveState, setSaveState] = useState<{ garmentId: number; clientImportId: string; phase: SavePhase } | null>(null)
+  const saveStateRef = useRef<typeof saveState>(null)
+  saveStateRef.current = saveState
   // Server authorization: one in-flight mint at a time, shared by concurrent starts.
   const authorizer = useMemo(() => createLiveMirrorAuthorizer(), [])
+  // Wardrobe saver: single-flight per idempotency key, independent of Live Mirror entirely.
+  const saver = useMemo(() => createWardrobeSaver(wardrobeSave), [wardrobeSave])
 
   // Refs mirror state that the animation loop and async callbacks read without re-rendering.
   const stageRef = useRef<HTMLDivElement>(null)
@@ -538,12 +582,69 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }:
     }
   }, [apply])
 
+  /**
+   * Save the current garment to the wardrobe. Uses only the normalized image and authenticated
+   * Convex storage + shopping imports — never Live Mirror, never the camera. Works in every
+   * provider state (never started, connecting, live, frozen, quota exhausted) and never disturbs
+   * the live/frozen preview. Retries reuse the garment's idempotency key, so the server stays
+   * idempotent; a stale completion (older garment id) resolves server-side but never touches UI.
+   */
+  const saveToWardrobe = useCallback(async () => {
+    const current = garmentRef.current
+    const blob = imageRef.current
+    if (!current || !blob) return
+    const state = saveStateRef.current
+    if (state && state.garmentId === current.id && (state.phase === "saving" || state.phase === "processing")) return
+    const { id, clientImportId } = current
+    const applyPhase = (phase: SavePhase) => {
+      if (garmentRef.current?.id === id) setSaveState({ garmentId: id, clientImportId, phase })
+    }
+    applyPhase("saving")
+    try {
+      const input: { blob: Blob; fileName: string; productTitle?: string; sourcePageUrl?: string; clientImportId: string } = {
+        blob,
+        fileName: current.fileName,
+        clientImportId
+      }
+      if (current.name) input.productTitle = current.name
+      if (current.sourcePageUrl) input.sourcePageUrl = current.sourcePageUrl
+      const { uploadId } = await saver.save(input)
+      if (garmentRef.current?.id !== id) return
+      applyPhase("processing")
+      const terminal = await saver.watch(uploadId, {
+        onPhase: applyPhase,
+        isCurrent: () => garmentRef.current?.id === id
+      })
+      if (garmentRef.current?.id !== id) return
+      applyPhase(terminal)
+      if (terminal === "failed") setNotice({ message: "Couldn't save. Try again." })
+      if (terminal === "needs_credits") setNotice({ message: SAVE_COPY.needs_credits.note! })
+      if (terminal === "no_item") setNotice({ message: SAVE_COPY.no_item.note! })
+    } catch (error: any) {
+      if (error?.message === "stopped" || garmentRef.current?.id !== id) return
+      applyPhase("failed")
+      setNotice({ message: toSaveFailureMessage(error) })
+    }
+  }, [saver])
+
   /** Entry point for every garment: load and normalise the image, then apply it. */
   const tryOn = useCallback(async (incoming: Incoming) => {
     setNotice(null); setDragging(false)
     const id = ++garmentSeqRef.current
     const name = cleanName(incoming.name || "")
-    setGarment({ id, name, preview: "", status: "reading" })
+    // A new garment always gets a fresh save identity: new idempotency key, idle save UI.
+    // An older save finishing later resolves server-side but can never touch this UI.
+    const clientImportId = crypto.randomUUID()
+    setGarment({
+      id,
+      name,
+      preview: "",
+      status: "reading",
+      fileName: incoming.file instanceof File ? incoming.file.name : "shopping-garment.jpg",
+      ...(typeof incoming.sourcePageUrl === "string" && incoming.sourcePageUrl ? { sourcePageUrl: incoming.sourcePageUrl } : {}),
+      clientImportId
+    })
+    setSaveState({ garmentId: id, clientImportId, phase: "idle" })
     if (phaseRef.current === "idle") void start()
     // The scan only runs once the user is framed; apply() starts it.
     try {
@@ -576,7 +677,7 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }:
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent || typeof event.data !== "object" || !event.data) return
       if (event.data.type === "openwear:drag") setDragging(!!event.data.active)
-      if (event.data.type === "openwear:garment") void tryOn({ file: event.data.file instanceof Blob ? event.data.file : undefined, url: typeof event.data.url === "string" ? event.data.url : undefined, name: typeof event.data.name === "string" ? event.data.name : "" })
+      if (event.data.type === "openwear:garment") void tryOn({ file: event.data.file instanceof Blob ? event.data.file : undefined, url: typeof event.data.url === "string" ? event.data.url : undefined, name: typeof event.data.name === "string" ? event.data.name : "", sourcePageUrl: typeof event.data.sourcePageUrl === "string" ? event.data.sourcePageUrl : undefined })
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
@@ -734,6 +835,9 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }:
   }
   const live = remoteVisible && (connection === "generating" || connection === "connected")
   const cameraOn = phase !== "idle" && phase !== "starting"
+  // Save button state belongs to the visible garment only; a stale save can never paint it.
+  const savePhase: SavePhase = saveState && garment && saveState.garmentId === garment.id ? saveState.phase : "idle"
+  const saveBusy = savePhase === "saving" || savePhase === "processing"
   // Informational only: authorizeLiveMirror stays authoritative for every new session.
   const quotaCopy = quotaStatusCopy(quotaStatus)
   // The Freeze control appears only once a usable AI frame is on screen (live implies the
@@ -797,6 +901,11 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus }:
             : <button className="garment-name" onClick={() => setEditingName(true)} title="Rename to describe the item better">{garment.name || "Look from photo"}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4-1 11-11-3-3L5 16l-1 4Z" /></svg></button>}
           <span className="garment-status">{garment.status === "live" && <i className="dot" />}{statusText[garment.status]}</span>
         </div>
+        {garment.preview ? <div className="save-row">
+          <button className="save" onClick={() => void saveToWardrobe()} disabled={saveBusy || savePhase === "ready"} title="Save this garment to your Fitcheck wardrobe">
+            {SAVE_COPY[savePhase].button}
+          </button>
+        </div> : null}
       </div>}
 
       {cameraOn && <div className="toolbar">

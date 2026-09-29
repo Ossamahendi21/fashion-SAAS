@@ -74,10 +74,20 @@ export default defineSchema({
       v.literal("partial"),
     ),
     createdAt: v.number(),
+    /**
+     * Shopping-import provenance. Set only by the extension save flow; normal uploads never
+     * carry these fields, and items resolve provenance through their uploadId.
+     */
+    source: v.optional(v.literal("shopping")),
+    sourcePageUrl: v.optional(v.string()),
+    sourceTitle: v.optional(v.string()),
+    /** Opaque client-generated idempotency key, scoped per user (see by_user_clientImportId). */
+    clientImportId: v.optional(v.string()),
   })
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
-    .index("by_batch", ["batchId"]),
+    .index("by_batch", ["batchId"])
+    .index("by_user_clientImportId", ["userId", "clientImportId"]),
 
   items: defineTable({
     userId: v.id("users"),

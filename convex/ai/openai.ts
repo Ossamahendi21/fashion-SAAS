@@ -15,7 +15,7 @@ import { vDetectedItem } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
 import { normalizeImageInput } from "./image_input";
-import { detectionInstructions, extractionPrompt, renderPrompt } from "./prompts";
+import { detectionInstructions, extractionPrompt, renderPrompt, shoppingDetectionInstructions } from "./prompts";
 
 /**
  * Every OpenAI call the app makes. Actions only: they read and write through `ai/pipeline.ts` so a
@@ -86,6 +86,59 @@ export const detectItems = internalAction({
       });
 
       const items = parseDetectedItems(response.output_text);
+      await ctx.runMutation(internal.ai.pipeline.markStep, {
+        jobId: args.jobId,
+        key: INGEST_STEPS.detect,
+        status: "running",
+        meta: {
+          model: DETECT_MODEL,
+          inputTextTokens: response.usage?.input_tokens ?? 0,
+          outputTokens: response.usage?.output_tokens ?? 0,
+        },
+      });
+      return items;
+    } catch (error) {
+      await ctx.runMutation(internal.ai.pipeline.markStep, {
+        jobId: args.jobId,
+        key: INGEST_STEPS.detect,
+        status: "failed",
+        error: errorText(error),
+      });
+      throw error;
+    }
+  },
+});
+
+/**
+ * gpt-5-mini identifies the ONE intended shopping product in a photo. The product title is an
+ * untrusted hint baked into the prompt as quoted data (see shoppingDetectionInstructions); the
+ * return is hard-capped to one item so a chatty model can never fan out into extractions.
+ * Free (text tokens only); the token counts land in the detect step's meta like detectItems.
+ */
+export const detectShoppingItem = internalAction({
+  args: { uploadId: v.id("uploads"), jobId: v.id("jobs"), productTitle: v.string() },
+  returns: v.array(vDetectedItem),
+  handler: async (ctx, args): Promise<DetectedItem[]> => {
+    try {
+      const photo = await ctx.runQuery(internal.ai.pipeline.uploadPhoto, { uploadId: args.uploadId });
+      // Inline the bytes: storage URLs are signed and, on a local deployment, unreachable from OpenAI.
+      const imageUrl = await storageDataUrl(ctx, photo.storageId);
+      const { instructions, schema } = shoppingDetectionInstructions(args.productTitle);
+      const response = await openai().responses.create({
+        model: modelId(DETECT_MODEL),
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: instructions },
+              { type: "input_image", image_url: imageUrl, detail: "high" },
+            ],
+          },
+        ],
+        text: { format: { type: "json_schema", name: "shopping_item", schema, strict: true } },
+      });
+
+      const items = parseDetectedItems(response.output_text).slice(0, 1);
       await ctx.runMutation(internal.ai.pipeline.markStep, {
         jobId: args.jobId,
         key: INGEST_STEPS.detect,

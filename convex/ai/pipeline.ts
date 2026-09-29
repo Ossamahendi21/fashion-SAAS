@@ -157,6 +157,93 @@ export const recordDetection = internalMutation({
   },
 });
 
+/**
+ * Turns a targeted shopping detection into rows: at most ONE item, ever. Zero found settles the
+ * upload as done with no charge and no item; one found reserves exactly one extraction credit
+ * through the existing `reserve` path and inserts the item as `extracting` (or `needsCredits`
+ * when the user cannot pay). Mirrors `recordDetection` accounting; normal multi-item uploads
+ * are untouched.
+ */
+export const recordShoppingDetection = internalMutation({
+  args: { jobId: v.id("jobs"), uploadId: v.id("uploads"), items: v.array(vDetectedItem) },
+  returns: v.object({
+    found: v.number(),
+    granted: v.number(),
+    skipped: v.number(),
+    toExtract: v.array(vExtractTarget),
+  }),
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ found: number; granted: number; skipped: number; toExtract: ExtractTarget[] }> => {
+    const job = await getJob(ctx, args.jobId);
+    const user = await ctx.db.get(job.userId);
+    if (!user) throw appError("NOT_FOUND", "User not found for this job.");
+    const upload = await ctx.db.get(args.uploadId);
+    if (!upload || upload.userId !== job.userId || job.uploadId !== args.uploadId) {
+      throw appError("NOT_FOUND", "That upload no longer exists.");
+    }
+
+    // At most ONE target item, enforced again at the transactional boundary no matter what the
+    // detector returned.
+    const detected = args.items.slice(0, 1);
+    const found = detected.length;
+    const detectCostUsd = detectCostOf(job);
+
+    if (found === 0) {
+      await ctx.db.patch(args.uploadId, { candidates: [], detectedCount: 0, status: "done" });
+      await setStep(ctx, args.jobId, INGEST_STEPS.detect, { status: "done", meta: { found: 0, costUsd: detectCostUsd } });
+      if (detectCostUsd > 0) await bumpDailyStats(ctx, { cogsUsd: detectCostUsd });
+      return { found: 0, granted: 0, skipped: 0, toExtract: [] };
+    }
+
+    const readyCount = await countReady(ctx, job.userId);
+    if (readyCount + 1 > LIMITS.maxItemsPerUser) {
+      throw appError(
+        "WARDROBE_FULL",
+        `Your wardrobe is full (${LIMITS.maxItemsPerUser} items). Delete a few before adding more.`,
+        { limit: LIMITS.maxItemsPerUser, current: readyCount },
+      );
+    }
+
+    const reservation = await reserve(ctx, user, 1, args.jobId);
+    const granted = reservation.granted;
+
+    const { bbox, ...attrs } = detected[0];
+    const itemId = await insertDetectedItem(ctx, {
+      userId: job.userId,
+      uploadId: args.uploadId,
+      attrs,
+      bbox,
+      status: granted > 0 ? "extracting" : "needsCredits",
+    });
+    const toExtract: ExtractTarget[] = granted > 0 ? [{ itemId, stepKey: extractStepKey(0) }] : [];
+    if (toExtract.length > 0) {
+      await addSteps(
+        ctx,
+        args.jobId,
+        toExtract.map((target) => ({ key: target.stepKey, meta: { itemId: target.itemId } })),
+      );
+    }
+    await setStep(ctx, args.jobId, INGEST_STEPS.detect, { status: "done", meta: { found: 1, costUsd: detectCostUsd } });
+    if (detectCostUsd > 0) await bumpDailyStats(ctx, { cogsUsd: detectCostUsd });
+    await setStep(ctx, args.jobId, INGEST_STEPS.reserve, {
+      status: "done",
+      meta:
+        reservation.shortfall > 0
+          ? { granted, shortfall: reservation.shortfall, reason: reservation.reason }
+          : { granted },
+    });
+
+    await ctx.db.patch(args.uploadId, {
+      candidates: detected,
+      detectedCount: 1,
+      status: granted > 0 ? "extracting" : "partial",
+    });
+    return { found: 1, granted, skipped: 1 - granted, toExtract };
+  },
+});
+
 /** Text-model tokens the detect action recorded on its step, priced as COGS when the step finishes. */
 function detectCostOf(job: Doc<"jobs">): number {
   const meta = job.steps.find((step) => step.key === INGEST_STEPS.detect)?.meta;

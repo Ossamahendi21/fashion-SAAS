@@ -44,6 +44,35 @@ export const recordCandidates = internalMutation({
   handler: recordCandidateDocs,
 });
 
+/**
+ * Shopping imports scan exactly like normal uploads but with a targeted detector (0 or 1 items)
+ * and no manual review: a found target flows straight into the existing reserve/insert/extract
+ * accounting via `recordShoppingDetection`, then the shared extraction fan-out and the shared
+ * `onIngestComplete` settlement (including refunds). Zero found settles cleanly with no charge.
+ */
+export const scanShoppingImport = workflow
+  .define({
+    args: { uploadId: v.id("uploads"), jobId: v.id("jobs"), productTitle: v.string() },
+    returns: vIngestOutcome,
+  })
+  .handler(async (step, args): Promise<IngestOutcome> => {
+    await step.runMutation(internal.ai.pipeline.beginIngest, { uploadId: args.uploadId, jobId: args.jobId });
+    const detected = await step.runAction(
+      internal.ai.openai.detectShoppingItem,
+      { uploadId: args.uploadId, jobId: args.jobId, productTitle: args.productTitle },
+      { retry: true },
+    );
+    await step.runAction(internal.subscriptions.refreshForJob, { jobId: args.jobId }, { retry: true });
+    const plan = await step.runMutation(internal.ai.pipeline.recordShoppingDetection, {
+      jobId: args.jobId,
+      uploadId: args.uploadId,
+      items: detected,
+    });
+    const results = await runExtractions(step, args.jobId, plan.toExtract);
+    const extracted = results.filter(Boolean).length;
+    return { extracted, failed: results.length - extracted, skipped: plan.skipped };
+  });
+
 export const onScanComplete = internalMutation({
   args: { workflowId: vWorkflowId, result: vResultValidator, context: v.object({ jobId: v.id("jobs") }) },
   returns: v.null(),

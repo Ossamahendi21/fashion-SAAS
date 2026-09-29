@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from "react"
 import type { PlasmoCSConfig, PlasmoGetRootContainer } from "plasmo"
 import styleText from "data-text:./style.css"
-import { nameFromFile, parseDrop } from "./lib/drop"
+import { canonicalSourcePageUrl, nameFromFile, parseDrop } from "./lib/drop"
 
 export const config: PlasmoCSConfig = { matches: ["http://*/*", "https://*/*"], all_frames: false, run_at: "document_idle" }
 
@@ -144,7 +144,9 @@ function OpenWearShell() {
     const dragged = draggedRef.current
     draggedRef.current = null
     const incoming = dragged || parseDrop(event.dataTransfer)
-    if (incoming?.url) toRoom({ type: "openwear:garment", url: incoming.url, name: usefulText(incoming.name) })
+    // Page provenance only: the canonical address, never cookies, storage, HTML or headers.
+    const sourcePageUrl = canonicalSourcePageUrl(window.location.href)
+    if (incoming?.url) toRoom({ type: "openwear:garment", url: incoming.url, name: usefulText(incoming.name), ...(sourcePageUrl ? { sourcePageUrl } : {}) })
   }
 
   // Drag the window by its header; resize from the bottom-left corner (the window hugs the right edge).
