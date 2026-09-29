@@ -40,18 +40,21 @@ import {
   revokeFrozenPreview,
   takeProviderConnection
 } from "../lib/freeze"
-import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
 import {
+  consumeCapability,
   createWardrobeSaver,
   generateShoppingUploadUrl,
   postBlobToConvex,
   registerShoppingImport,
+  parseGarmentMessage,
   SAVE_COPY,
+  saveRemoteGarment,
   shoppingImportStatus,
   toSaveFailureMessage,
   type SavePhase,
   type WardrobeSaveDeps
 } from "../lib/wardrobe-save"
+import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
 import "./room.css"
 
@@ -99,6 +102,11 @@ function RoomAuthBadge() {
   if (status.state === "loading") return <small>Checking Fitcheck sign-in…</small>
   if (status.state === "signed-out") return <small>Not signed in — the fitting room needs a Fitcheck account.</small>
   return <small>Signed in · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</small>
+}
+
+/** Posts to the embedding shop page, if this room is actually iframed. Payloads carry no secrets. */
+function postToParent(message: Record<string, unknown>) {
+  if (typeof window !== "undefined" && window.parent !== window) window.parent.postMessage(message, "*")
 }
 
 /** Opens the Fitcheck sign-in page on the web app, where the Clerk session actually lives. */
@@ -248,6 +256,8 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
   const trackerRef = useRef<Awaited<ReturnType<typeof createPoseTracker>> | null>(null)
   const poseRef = useRef<Point[] | null>(null)
   const phaseRef = useRef<Phase>("idle")
+  const authStatusRef = useRef(authStatus)
+  authStatusRef.current = authStatus
   const framedRef = useRef(false)
   const framedWaitersRef = useRef<(() => void)[]>([])
   const holdStartRef = useRef(0)
@@ -672,16 +682,60 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     void apply(next.id, imageRef.current).catch(error => { if (error?.message !== "stopped") setNotice(friendly(error)) })
   }, [apply])
 
+  // Announces readiness to the embedding page so contextual page actions (Step 3B) can
+  // handshake before sending. Benign payload; the page already knows the iframe exists.
+  useEffect(() => {
+    postToParent({ type: "openwear:room-ready" })
+  }, [])
+
+  // Garments dragged on the host page arrive from the content script. Every garment
+  // command must carry a one-time garment-scoped capability: the shop page itself can
+  // postMessage this iframe, so shape alone proves nothing. Invalid, forged, or replayed
+  // messages are ignored silently before tryOn ever runs.
+  const handleGarmentMessage = useCallback(async (data: unknown) => {
+    const command = parseGarmentMessage(data)
+    if (!command) return
+    const { capability, ...incoming } = command
+    if (!(await consumeCapability(chrome.storage.session, capability, "garment"))) return
+    void tryOn(incoming)
+  }, [tryOn])
+
   // Garments dragged on the host page arrive from the content script.
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent || typeof event.data !== "object" || !event.data) return
       if (event.data.type === "openwear:drag") setDragging(!!event.data.active)
-      if (event.data.type === "openwear:garment") void tryOn({ file: event.data.file instanceof Blob ? event.data.file : undefined, url: typeof event.data.url === "string" ? event.data.url : undefined, name: typeof event.data.name === "string" ? event.data.name : "", sourcePageUrl: typeof event.data.sourcePageUrl === "string" ? event.data.sourcePageUrl : undefined })
+      if (event.data.type === "openwear:garment") { void handleGarmentMessage(event.data); return }
+      if (event.data.type === "openwear:room-ping") { postToParent({ type: "openwear:room-ready" }); return }
+      // Headless save from a page action: same saver as the in-room button, no camera, no Live
+      // Mirror. The one-time token proves the request came from our content script, not the page.
+      if (event.data.type === "openwear:save-garment") {
+        const input = event.data
+        void saveRemoteGarment(
+          {
+            isSignedIn: () => {
+              const status = authStatusRef.current
+              return status?.state === "signed-in" && status.convexAuthenticated
+            },
+            openSignIn: signInOnFitcheck,
+            fetchImageDataUrl: (url: string) => background<string>("image", { url }),
+            normalizeImage,
+            takeToken: (token: string) => consumeCapability(chrome.storage.session, token, "save"),
+            saver,
+            reply: (phase: SavePhase | "signed_out") => {
+              if (typeof input.clientImportId === "string") {
+                postToParent({ type: "openwear:save-status", clientImportId: input.clientImportId, phase })
+              }
+            }
+          },
+          input
+        )
+        return
+      }
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [tryOn])
+  }, [handleGarmentMessage, saver, tryOn])
 
   // ---------- Vision + scan effect loop ----------
   // One requestAnimationFrame loop: runs pose detection (~15 fps) while framing or scanning, feeds the

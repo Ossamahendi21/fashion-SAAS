@@ -124,7 +124,7 @@ test("7: no legacy credential is ever read back into application behavior", asyn
   globalThis.chrome = fakeChrome(storage)
   try {
     const loaded = await settings.loadSettings()
-    assert.deepEqual(loaded, { autoFreezeSeconds: 30 }, "only the safe preference is returned")
+    assert.deepEqual(loaded, { autoFreezeSeconds: 30, shoppingActionsEnabled: true }, "only safe preferences are returned")
     assert.equal(storage.store.has("apiKey"), false, "loading also cleans")
   } finally {
     delete globalThis.chrome

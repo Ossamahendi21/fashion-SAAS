@@ -12,10 +12,15 @@ export type Settings = {
    * billing effect, and 0 means "no early freeze, use the server limit".
    */
   autoFreezeSeconds: number
+  /**
+   * Local-only toggle for the contextual shopping actions ("Try on" / "Save" on hovered
+   * product images). Never affects billing or auth.
+   */
+  shoppingActionsEnabled: boolean
 }
 
 /** Safe default at the server production target, so it can never lengthen a session. */
-export const DEFAULT_SETTINGS: Settings = { autoFreezeSeconds: 60 }
+export const DEFAULT_SETTINGS: Settings = { autoFreezeSeconds: 60, shoppingActionsEnabled: true }
 
 /**
  * The exact legacy keys removed in Step 2E3. Canonical list: every purge path references
@@ -34,7 +39,10 @@ export async function loadSettings(): Promise<Settings> {
     saved.autoFreezeSeconds >= 0
       ? Math.floor(saved.autoFreezeSeconds)
       : DEFAULT_SETTINGS.autoFreezeSeconds
-  return { autoFreezeSeconds }
+  return {
+    autoFreezeSeconds,
+    shoppingActionsEnabled: saved.shoppingActionsEnabled !== false
+  }
 }
 
 export async function saveSettings(patch: Partial<Settings>) {

@@ -224,12 +224,223 @@ test("36: page provenance strips fragments and rejects everything unsafe", () =>
 })
 
 test("37: the content script sends provenance only, never page secrets", () => {
-  const sends = [...content.matchAll(/toRoom\(\{ type: "openwear:garment".*?\}\)/g)].map(match => match[0])
-  assert.ok(sends.length >= 1, "garment messages exist")
-  for (const send of sends) {
-    assert.ok(!/cookie|localStorage|innerHTML|outerHTML|document\.documentElement/.test(send), `no page secrets in ${send.slice(0, 80)}`)
-  }
+  const forward = content.slice(content.indexOf("const forwardGarment"), content.indexOf("/** Try on:"))
+  assert.ok(forward.includes('type: "openwear:garment"'), "garment messages exist")
+  assert.ok(!/cookie|localStorage|innerHTML|outerHTML|document\.documentElement/.test(forward), "no page secrets in garment posts")
+  assert.ok(forward.includes("capability"), "every garment post carries a capability")
   assert.ok(content.includes("canonicalSourcePageUrl(window.location.href)"), "page URL is canonicalized at the source")
-  const handler = room.slice(room.indexOf('event.data.type === "openwear:garment"'))
-  assert.ok(handler.includes("sourcePageUrl"), "the room receives provenance")
+  assert.ok(room.includes("const handleGarmentMessage"), "garment posts go through the validation gate")
+})
+
+// ---------- Cross-context save protocol ----------
+
+function fakeTokenStore(seed = {}) {
+  const store = new Map(Object.entries(seed))
+  return {
+    store,
+    get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter(key => store.has(key)).map(key => [key, store.get(key)])),
+    set: async (items) => { for (const [key, value] of Object.entries(items)) store.set(key, value) },
+    remove: async (keys) => { for (const key of (Array.isArray(keys) ? keys : [keys])) store.delete(key) }
+  }
+}
+
+test("one-time capabilities are minted per scope, consumed once, and reject forgeries", async () => {
+  const store = fakeTokenStore()
+  const token = await saver.issueCapability(store, "save", () => "fixed-id")
+  assert.equal(token, "owcap-save-fixed-id")
+  assert.equal(await saver.consumeCapability(store, token, "save"), true, "first use succeeds")
+  assert.equal(await saver.consumeCapability(store, token, "save"), false, "replays fail")
+  assert.equal(await saver.consumeCapability(store, "owcap-save-never-issued", "save"), false, "forgeries fail")
+  assert.equal(await saver.consumeCapability(store, null, "save"), false)
+  assert.equal(await saver.consumeCapability(store, "x".repeat(300), "save"), false, "oversized tokens fail")
+})
+
+test("capability scopes never overlap", async () => {
+  const store = fakeTokenStore()
+  const saveToken = await saver.issueCapability(store, "save", () => "scope-a")
+  const garmentToken = await saver.issueCapability(store, "garment", () => "scope-b")
+  assert.equal(await saver.consumeCapability(store, saveToken, "garment"), false, "save token cannot satisfy garment")
+  assert.equal(await saver.consumeCapability(store, garmentToken, "save"), false, "garment token cannot satisfy save")
+  // A wrong-scope attempt burns the token: fail closed, never leave it usable afterwards.
+  assert.equal(await saver.consumeCapability(store, saveToken, "save"), false)
+  assert.equal(await saver.consumeCapability(store, garmentToken, "garment"), false)
+})
+
+test("expired capabilities fail closed", async () => {
+  const store = fakeTokenStore()
+  const token = await saver.issueCapability(store, "save", () => "old-id")
+  assert.equal(await saver.consumeCapability(store, token, "save", Date.now() + 11 * 60 * 1000), false)
+})
+
+test("client import ids mirror the server charset rule", () => {
+  assert.equal(saver.isValidClientImportId("client-import-1"), true)
+  assert.equal(saver.isValidClientImportId(crypto.randomUUID()), true)
+  for (const bad of ["", "has space", "semi;colon", "x".repeat(129), null, 42]) {
+    assert.equal(saver.isValidClientImportId(bad), false, JSON.stringify(bad))
+  }
+})
+
+test("display file names come from the URL path with a safe fallback", () => {
+  assert.equal(saver.fileNameFromUrl("https://shop.example.com/images/blue-shirt.jpg"), "blue-shirt.jpg")
+  assert.equal(saver.fileNameFromUrl("https://shop.example.com/images/blue-shirt.jpg?width=800"), "blue-shirt.jpg")
+  assert.equal(saver.fileNameFromUrl("https://shop.example.com/"), "shopping-garment.jpg")
+  assert.equal(saver.fileNameFromUrl("not a url"), "shopping-garment.jpg")
+  assert.ok(saver.fileNameFromUrl("https://shop.example.com/" + "a".repeat(300) + ".jpg").length <= 128)
+})
+
+test("reply waiters match responses to requests with timeouts", async () => {
+  const waiter = saver.createReplyWaiter()
+  const pending = waiter.wait("k1", 50, "timed-out")
+  assert.equal(waiter.pendingCount(), 1)
+  assert.equal(waiter.resolve("k1", "answer"), true)
+  assert.equal(await pending, "answer")
+  assert.equal(waiter.pendingCount(), 0)
+  assert.equal(waiter.resolve("k1", "late"), false, "replays resolve nothing")
+  assert.equal(await waiter.wait("k2", 5, "timed-out"), "timed-out")
+  waiter.wait("k3", 1000, "x")
+  waiter.cancel("k3")
+  assert.equal(waiter.pendingCount(), 0)
+})
+
+function remoteSaver({ terminal = "ready" } = {}) {
+  const calls = { save: [], watch: 0 }
+  return {
+    calls,
+    saver: {
+      save: async (input) => { calls.save.push(input); return { uploadId: "uploads-9", jobId: "jobs-9" } },
+      watch: async () => { calls.watch++; return terminal }
+    }
+  }
+}
+
+const remoteDeps = (overrides = {}) => ({
+  isSignedIn: () => true,
+  openSignIn: () => {},
+  fetchImageDataUrl: async () => "data:image/jpeg;base64,/9j/",
+  normalizeImage: async () => ({ blob: new Blob(["x"], { type: "image/jpeg" }) }),
+  takeToken: async () => true,
+  saver: remoteSaver().saver,
+  reply: () => {},
+  ...overrides
+})
+
+const remoteInput = (overrides = {}) => ({
+  imageUrl: "https://shop.example.com/images/blue.jpg",
+  productTitle: "Blue Shirt",
+  sourcePageUrl: "https://shop.example.com/p/1",
+  clientImportId: "client-import-9",
+  token: "save-token-9",
+  ...overrides
+})
+
+test("room-side save validates, consumes the token, and replies with the terminal phase", async () => {
+  const replies = []
+  const { calls, saver: fake } = remoteSaver({ terminal: "needs_credits" })
+  await saver.saveRemoteGarment({ ...remoteDeps({ saver: fake, reply: (phase) => replies.push(phase) }), takeToken: async (token) => {
+    assert.equal(token, "save-token-9")
+    return true
+  } }, remoteInput())
+  assert.equal(calls.save.length, 1)
+  assert.equal(calls.save[0].fileName, "blue.jpg")
+  assert.equal(calls.save[0].clientImportId, "client-import-9")
+  assert.deepEqual(replies, ["needs_credits"])
+})
+
+test("room-side save silently ignores malformed or forged requests", async () => {
+  for (const bad of [
+    remoteInput({ clientImportId: "has space" }),
+    remoteInput({ imageUrl: "javascript:alert(1)" }),
+    remoteInput({ imageUrl: "" }),
+    remoteInput({ token: 42 })
+  ]) {
+    const replies = []
+    const { calls, saver: fake } = remoteSaver()
+    await saver.saveRemoteGarment({ ...remoteDeps({ saver: fake, reply: (phase) => replies.push(phase) }) }, bad)
+    assert.equal(calls.save.length, 0, "no saver call for malformed input")
+    assert.deepEqual(replies, [], "no reply leaks anything to a hostile sender")
+  }
+  const replies = []
+  await saver.saveRemoteGarment({ ...remoteDeps({ reply: (phase) => replies.push(phase), takeToken: async () => false }) }, remoteInput())
+  assert.deepEqual(replies, [], "a forged token is silently ignored")
+})
+
+test("room-side save opens sign-in and replies without touching the saver when signed out", async () => {
+  let signInOpened = 0
+  const replies = []
+  const { calls, saver: fake } = remoteSaver()
+  await saver.saveRemoteGarment({
+    ...remoteDeps({ saver: fake, reply: (phase) => replies.push(phase) }),
+    isSignedIn: () => false,
+    openSignIn: () => { signInOpened++ }
+  }, remoteInput())
+  assert.equal(signInOpened, 1)
+  assert.deepEqual(replies, ["signed_out"])
+  assert.equal(calls.save.length, 0, "nothing is uploaded while signed out")
+})
+
+test("room-side save replies failed when the pipeline throws", async () => {
+  const replies = []
+  await saver.saveRemoteGarment({
+    ...remoteDeps({ reply: (phase) => replies.push(phase) }),
+    fetchImageDataUrl: async () => { throw new Error("private image URL") }
+  }, remoteInput())
+  assert.deepEqual(replies, ["failed"])
+})
+
+test("content-side save opens the room, handshakes, posts once, and returns the phase", async () => {
+  const posts = []
+  let opened = 0
+  const result = await saver.requestRemoteSave(
+    {
+      openRoom: () => { opened++ },
+      postToRoom: (message) => posts.push(message),
+      awaitRoomReady: async () => true,
+      issueToken: async () => "save-issued-1",
+      awaitSaveStatus: async () => "ready"
+    },
+    { imageUrl: "https://shop.example.com/i.jpg", productTitle: "Blue", sourcePageUrl: "https://shop.example.com/p" },
+    "client-import-7"
+  )
+  assert.deepEqual(result, { clientImportId: "client-import-7", phase: "ready" })
+  assert.equal(opened, 1)
+  assert.equal(posts.length, 1, "exactly one save message")
+  assert.deepEqual(posts[0], {
+    type: "openwear:save-garment",
+    imageUrl: "https://shop.example.com/i.jpg",
+    productTitle: "Blue",
+    sourcePageUrl: "https://shop.example.com/p",
+    clientImportId: "client-import-7",
+    token: "save-issued-1"
+  })
+})
+
+test("content-side save fails closed when the room never answers", async () => {
+  const posts = []
+  const result = await saver.requestRemoteSave(
+    {
+      openRoom: () => {},
+      postToRoom: (message) => posts.push(message),
+      awaitRoomReady: async () => false,
+      issueToken: async () => { throw new Error("must not mint a token for a dead room") },
+      awaitSaveStatus: async () => { throw new Error("must not wait without a post") }
+    },
+    { imageUrl: "https://shop.example.com/i.jpg" }
+  )
+  assert.equal(result.phase, "failed")
+  assert.equal(posts.length, 0, "nothing is posted to a room that never answered")
+})
+
+test("content-side save maps room silence after posting to a retryable failure", async () => {
+  const result = await saver.requestRemoteSave(
+    {
+      openRoom: () => {},
+      postToRoom: () => {},
+      awaitRoomReady: async () => true,
+      issueToken: async () => "save-issued-2",
+      awaitSaveStatus: async () => "timeout"
+    },
+    { imageUrl: "https://shop.example.com/i.jpg" },
+    "client-import-8"
+  )
+  assert.deepEqual(result, { clientImportId: "client-import-8", phase: "failed" })
 })
