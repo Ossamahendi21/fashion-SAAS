@@ -13,7 +13,8 @@
     "test": "node --test tests/*.test.mjs",
     "test:bundle": "node --test tests/bundle.test.mjs",
     "typecheck": "tsc --noEmit",
-    "copy-vision:dev": "node scripts/copy-vision.mjs build/chrome-mv3-dev"
+    "copy-vision:dev": "node scripts/copy-vision.mjs build/chrome-mv3-dev",
+    "test:e2e": "node e2e/run-e2e.mjs"
   },
   "dependencies": {
     "@clerk/chrome-extension": "^3.1.87",
@@ -29,6 +30,7 @@
     "@types/react-dom": "^18.3.1",
     "esbuild": "^0.25.12",
     "plasmo": "0.90.5",
+    "puppeteer-core": "24.15.0",
     "typescript": "^5.7.3"
   },
   "manifest": {

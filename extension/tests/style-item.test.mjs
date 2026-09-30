@@ -126,7 +126,10 @@ test("23: server denials surface safe copy without styling", () => {
 })
 
 test("save resolution feeds styling: ready saves resolve their item id once", () => {
-  const saverBlock = room.slice(room.indexOf("if (terminal === \"ready\") {"), room.indexOf("if (terminal === \"ready\") {") + 600)
-  assert.ok(saverBlock.includes("wardrobeSave.queryStatus(uploadId)"), "item id resolved read-only")
-  assert.ok(saverBlock.includes("setStyleState({ garmentId: id, itemId: status.itemId"), "style armed with the saved id")
+  // Step 4A.2 moved this transition into the canonical adoptSavedItem helper, which BOTH the
+  // in-room button and a contextual page-pill save now call.
+  const adopt = room.slice(room.indexOf("const adoptSavedItem = useCallback"), room.indexOf("const saveToWardrobe = useCallback"))
+  assert.ok(adopt.includes("wardrobeSave.queryStatus(uploadId)"), "item id resolved read-only")
+  assert.ok(adopt.includes("setStyleState({ garmentId, itemId: status.itemId"), "style armed with the saved id")
+  assert.ok(room.includes('if (terminal === "ready") await adoptSavedItem(id, uploadId)'), "in-room save adopts through the shared helper")
 })

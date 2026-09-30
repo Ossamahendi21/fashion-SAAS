@@ -225,7 +225,10 @@ function RoomWithAuth() {
   )
 }
 
-function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal, markOwned, requestAdvice }: {
+/** Room body with all platform effects injected as props, so the browser E2E harness can
+ * mount the real component with stub adapters. Exported for the test-only harness entry;
+ * production behavior is unchanged. */
+export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal, markOwned, requestAdvice }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
   refreshBilling?: () => Promise<unknown>
@@ -657,6 +660,33 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
   }, [apply])
 
   /**
+   * The single canonical "this garment is now a saved wardrobe item" transition. Both the
+   * in-room Save button and a contextual page-pill Save call this, so the two entry points can
+   * never drift: a successful save marks the visible garment saved, resolves its itemId once
+   * (so Style needs no re-upload and no second registration), and arms Style plus the
+   * still-considering purchase transition and advice. It only READS the completed save — no
+   * upload, no register, no extraction credit, no Style, no Advice, no markOwned, no Live
+   * Mirror. A stale completion (a newer garment is now visible) resolves without painting.
+   */
+  const adoptSavedItem = useCallback(async (garmentId: number, uploadId: string) => {
+    const started = garmentRef.current
+    if (!started || started.id !== garmentId) return
+    try {
+      const status = await wardrobeSave.queryStatus(uploadId)
+      const current = garmentRef.current
+      if (!current || current.id !== garmentId || status.state !== "ready" || !status.itemId) return
+      setSaveState({ garmentId, clientImportId: current.clientImportId, phase: "ready" })
+      setStyleState({ garmentId, itemId: status.itemId, phase: "idle" })
+      if (status.ownership !== "owned") {
+        setOwnState({ garmentId, itemId: status.itemId, phase: "idle" })
+        setAdviceState({ garmentId, itemId: status.itemId, phase: "idle" })
+      }
+    } catch {
+      // Saving already succeeded; styling simply stays unavailable for this garment.
+    }
+  }, [wardrobeSave])
+
+  /**
    * Save the current garment to the wardrobe. Uses only the normalized image and authenticated
    * Convex storage + shopping imports — never Live Mirror, never the camera. Works in every
    * provider state (never started, connecting, live, frozen, quota exhausted) and never disturbs
@@ -694,29 +724,13 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
       if (terminal === "failed") setNotice({ message: "Couldn't save. Try again." })
       if (terminal === "needs_credits") setNotice({ message: SAVE_COPY.needs_credits.note! })
       if (terminal === "no_item") setNotice({ message: SAVE_COPY.no_item.note! })
-      // A saved garment becomes styleable: resolve its wardrobe item id once, so Style this
-      // item needs no re-upload and no second registration. A still-considering candidate
-      // also becomes eligible for the purchase transition ("I bought this").
-      if (terminal === "ready") {
-        try {
-          const status = await wardrobeSave.queryStatus(uploadId)
-          if (garmentRef.current?.id === id && status.state === "ready" && status.itemId) {
-            setStyleState({ garmentId: id, itemId: status.itemId, phase: "idle" })
-            if (status.ownership !== "owned") {
-              setOwnState({ garmentId: id, itemId: status.itemId, phase: "idle" })
-              setAdviceState({ garmentId: id, itemId: status.itemId, phase: "idle" })
-            }
-          }
-        } catch {
-          // Saving already succeeded; styling simply stays unavailable for this garment.
-        }
-      }
+      if (terminal === "ready") await adoptSavedItem(id, uploadId)
     } catch (error: any) {
       if (error?.message === "stopped" || garmentRef.current?.id !== id) return
       applyPhase("failed")
       setNotice({ message: toSaveFailureMessage(error) })
     }
-  }, [saver, wardrobeSave])
+  }, [saver, wardrobeSave, adoptSavedItem])
 
   /**
    * Style the saved wardrobe item: one authenticated styling request per click through the
@@ -911,6 +925,10 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
       // Mirror. The one-time token proves the request came from our content script, not the page.
       if (event.data.type === "openwear:save-garment") {
         const input = event.data
+        // The request is only adoptable for the garment that is visible when it arrives. The
+        // helper re-checks currency before painting, so a save that lands after the user has
+        // moved on still answers the page but never overwrites the newer garment.
+        const targetGarmentId = garmentRef.current?.id
         void saveRemoteGarment(
           {
             isSignedIn: () => {
@@ -922,6 +940,7 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
             normalizeImage,
             takeToken: (token: string) => consumeCapability(chrome.storage.session, token, "save"),
             saver,
+            adoptSavedItem: targetGarmentId === undefined ? undefined : (uploadId) => adoptSavedItem(targetGarmentId, uploadId),
             reply: (phase: SavePhase | "signed_out") => {
               if (typeof input.clientImportId === "string") {
                 postToParent({ type: "openwear:save-status", clientImportId: input.clientImportId, phase })
@@ -935,7 +954,7 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [handleGarmentMessage, saver, tryOn])
+  }, [handleGarmentMessage, saver, tryOn, adoptSavedItem])
 
   // ---------- Vision + scan effect loop ----------
   // One requestAnimationFrame loop: runs pose detection (~15 fps) while framing or scanning, feeds the
@@ -1226,14 +1245,17 @@ function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, w
                 </div>
               </div>
             ))}
-          </div> : <button
-            className="save"
-            onClick={() => void styleItem()}
-            disabled={styleState.phase === "styling"}
-            title="Get outfit ideas around this saved item"
-          >
-            {styleState.phase === "styling" ? STYLE_COPY.stylingButton : styleState.phase === "failed" ? STYLE_COPY.failedButton : STYLE_COPY.styleButton}
-          </button>}
+          </div> : null}
+          <div className="save-row">
+            <button
+              className="save"
+              onClick={() => void styleItem()}
+              disabled={styleState.phase === "styling"}
+              title="Get outfit ideas around this saved item"
+            >
+              {styleState.phase === "styling" ? STYLE_COPY.stylingButton : styleState.phase === "failed" ? STYLE_COPY.failedButton : STYLE_COPY.styleButton}
+            </button>
+          </div>
         </div> : null}
       </div>}
 

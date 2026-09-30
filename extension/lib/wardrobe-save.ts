@@ -586,6 +586,13 @@ export type RemoteSaveRoomDeps = {
   saver: WardrobeSaver
   /** Terminal phase (or signed_out) back to the page. Carries no secrets. */
   reply: (phase: SavePhase | "signed_out") => void
+  /**
+   * Optional: adopt a successful save into the room's saved-item state (the same transition
+   * the in-room Save button uses) so a page-pill save exposes Style / Advice / I bought this.
+   * Receives the uploadId of the already-completed save; it must NOT re-save. Re-entrancy and
+   * stale-garment safety are the callee's responsibility (it knows the current garment).
+   */
+  adoptSavedItem?: (uploadId: string) => Promise<void>
 }
 
 /**
@@ -618,6 +625,10 @@ export async function saveRemoteGarment(deps: RemoteSaveRoomDeps, input: RemoteS
     if (typeof input.sourcePageUrl === "string" && input.sourcePageUrl) saveInput.sourcePageUrl = input.sourcePageUrl
     const { uploadId } = await deps.saver.save(saveInput)
     const terminal = await deps.saver.watch(uploadId, {})
+    // A page-pill save and the in-room button must land on the SAME saved-item state, so the
+    // room's canonical adoption runs here too. It only reads the completed save; it never
+    // uploads, registers, or spends another credit.
+    if (terminal === "ready" && deps.adoptSavedItem) await deps.adoptSavedItem(uploadId)
     deps.reply(terminal)
   } catch {
     deps.reply("failed")

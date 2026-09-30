@@ -7,7 +7,24 @@
 // no per-image listeners (the page uses one delegated pointer handler), no DOM scans on
 // pointer movement (targets arrive pre-resolved), and reposition work is rAF-throttled.
 
-export type OverlayRect = { x: number; y: number; width: number; height: number }
+/** Marks the nodes this extension owns, so page events can be told apart from ours. */
+export const UI_ATTR = "data-ow-ui"
+
+/**
+ * Ownership guard for a pointer boundary crossing.
+ *
+ * `relatedTarget` is retargeted to the Shadow host whenever the pointer enters our
+ * Shadow DOM, so the host itself carries {@link UI_ATTR} and the guard resolves through
+ * `closest` rather than matching the pill directly. Only nodes we created are tagged, so
+ * ordinary page markup is never exempt.
+ */
+export function isExtensionOwnedUi(node: unknown): boolean {
+  const candidate = node as { closest?: (selector: string) => unknown } | null
+  if (!candidate || typeof candidate.closest !== "function") return false
+  return candidate.closest(`[${UI_ATTR}]`) != null
+}
+
+export type OverlayRect = { x: number, y: number, width: number, height: number }
 
 /** A product image the pill is currently anchored to. */
 export type HoverTarget = {

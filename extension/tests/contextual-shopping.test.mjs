@@ -48,7 +48,8 @@ test("14: extension UI, chrome pages, localhost and non-http contexts are exclud
 
 test("18: the overlay can never target extension roots or its own pill", () => {
   assert.ok(content.includes('img.closest("openwear-root")'), "images inside our UI are extension-owned")
-  assert.ok(content.includes('related.closest("[data-ow-ui]")'), "moving onto the pill keeps it alive")
+  assert.ok(content.includes("if (isExtensionOwnedUi(related)) return"), "moving onto the pill keeps it alive")
+  assert.ok(content.includes('host.setAttribute(UI_ATTR, "host")'), "the Shadow host is ownership-tagged, so retargeted crossings are recognised")
 })
 
 // ---------- Try on (19–22) ----------
@@ -57,11 +58,23 @@ test("19/20: Try on sends one garment message with sanitized provenance and a ca
   assert.ok(content.includes("const forwardGarment"), "one shared garment forwarder for drag and hover paths")
   const forward = content.slice(content.indexOf("const forwardGarment"), content.indexOf("/** Try on:"))
   assert.ok(forward.includes('type: "openwear:garment"'), "reuses the drag message contract")
-  assert.ok(forward.includes("issueCapability(chrome.storage.session, \"garment\")"), "every garment post carries a fresh capability")
+  assert.ok(forward.includes('requestCapability("garment")'), "every garment post carries a fresh capability minted by the worker")
   assert.ok(forward.includes("pendingTryOnRef.current = message"), "early posts wait for the room")
   assert.ok(forward.includes("setOpen(true)"), "closed room is opened")
   assert.ok(!forward.includes("authorize") && !forward.includes("Convex") && !forward.includes("liveMirror"), "no authorization path")
   assert.ok(content.includes("void forwardGarment({"), "try-on and both drop paths share the forwarder")
+})
+
+test("Save pings an already-open room instead of waiting for an unsolicited reply", () => {
+  // Regression: the room announces readiness on mount and only answers `openwear:room-ping`.
+  // Save on an already-open room therefore hung for the full timeout and reported failure.
+  const save = content.slice(content.indexOf("const sendSave"), content.indexOf("/** Messages to the fitting room"))
+  assert.ok(save.includes('postToRoom({ type: "openwear:room-ping" })'), "Save pings the room")
+  const waiterIndex = save.indexOf('wait("ready"')
+  const pingIndex = save.indexOf('postToRoom({ type: "openwear:room-ping" })')
+  assert.ok(waiterIndex > 0 && pingIndex > waiterIndex, "the waiter is registered before the ping, so a fast reply is not missed")
+  assert.ok(room.includes('event.data.type === "openwear:room-ping"'), "the room answers the ping")
+  assert.ok(room.includes('postToParent({ type: "openwear:room-ready" })'), "the room announces readiness on mount and to a ping")
 })
 
 test("21: Try on opens the room when needed and flushes after load", () => {

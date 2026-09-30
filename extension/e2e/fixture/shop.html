@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Synthetic Outfitters — E2E fixture shop</title>
+<meta property="og:title" content="Synthetic Outfitters">
+<link rel="icon" href="data:,">
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f4f4f4; color: #111; }
+  header { background: #111; color: #fff; padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px; }
+  .hero { display: flex; gap: 32px; align-items: flex-start; }
+  .hero img { width: 600px; height: 800px; background: #ddd; }
+  .buy-box h1 { font-size: 28px; margin: 0 0 8px; }
+  .spacer { height: 1400px; }
+  .product-card { border: 1px solid #ccc; padding: 16px; background: #fff; max-width: 560px; }
+  .product-card h3 { margin: 0 0 12px; }
+  .product-card img { width: 500px; height: 700px; background: #ddd; }
+  .banner img { width: 1200px; max-width: 100%; height: 180px; }
+  footer { padding: 48px 24px; color: #666; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/images/logo.png" width="48" height="48" alt="Synthetic Outfitters logo">
+  <strong>Synthetic Outfitters</strong>
+  <img src="/images/avatar.png" width="64" height="64" alt="shopper avatar" style="margin-left:auto">
+</header>
+<main>
+  <div class="banner"><img src="/images/banner.png" alt="sale banner"></div>
+  <div class="hero">
+    <img id="product-main" src="/images/product-jacket.png" alt="Olive field jacket">
+    <div class="buy-box">
+      <h1>Olive Field Jacket</h1>
+      <p>Four pockets, storm flap, benchmark twill. Not for sale — pixels only.</p>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <div class="product-card" id="nested-card">
+    <h3>Rose Summer Dress</h3>
+    <a href="/products/rose-summer-dress"><img id="product-second" src="/images/product-dress.png" alt="Rose summer dress"></a>
+  </div>
+  <div class="spacer"></div>
+</main>
+<footer>Fixture page for OpenWear extension E2E. No real products, no network beyond this server.</footer>
+<script>
+  // HOSTILE PAGE WORLD: the shop itself tries to drive the fitting room without a
+  // capability, exactly like an attacker page could. Every attempt must fail silently.
+  window.__owE2eHostile = { sent: 0 };
+  function hostilePost(message) {
+    window.__owE2eHostile.sent += 1;
+    window.postMessage(message, "*");
+  }
+  window.addEventListener("load", () => {
+    setTimeout(() => {
+      hostilePost({ type: "openwear:garment", url: location.origin + "/images/product-jacket.png", name: "Forged jacket" });
+      hostilePost({ type: "openwear:garment", url: location.origin + "/images/product-jacket.png", name: "Forged jacket", capability: "owcap-garment-forged-1" });
+      hostilePost({ type: "openwear:save-garment", imageUrl: location.origin + "/images/product-jacket.png", clientImportId: "forged-save-1", token: "owcap-save-forged-1" });
+    }, 500);
+  });
+</script>
+</body>
+</html>

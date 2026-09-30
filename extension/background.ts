@@ -1,10 +1,17 @@
-// Background service worker: downloads garment/product images without site cookies.
+// Background service worker: downloads garment/product images without site cookies, and mints
+// the one-time capabilities that authorise a garment handoff or a save.
 //
-// It holds no credentials and mints no tokens. Step 2E3 removed the browser-side permanent
-// Decart credential completely (the `token`, `status` and `test-key` handlers are gone):
-// Live Mirror authorization is a server-side Convex action (convex/liveMirror.ts), and the
-// ONLY permanent Decart credential is the server-side DECART_API_KEY env variable.
+// It holds no credentials. Step 2E3 removed the browser-side permanent Decart credential
+// completely (the `token`, `status` and `test-key` handlers are gone): Live Mirror
+// authorization is a server-side Convex action (convex/liveMirror.ts), and the ONLY permanent
+// Decart credential is the server-side DECART_API_KEY env variable.
+//
+// Capability minting lives here rather than in the content script because
+// `chrome.storage.session` is only exposed to trusted extension contexts; a content script
+// cannot write it at all. See lib/capability-service.ts. The image path below keeps its own
+// stricter gate and is untouched by that change.
 
+import { handleIssueCapability, ISSUE_CAPABILITY_MESSAGE } from "./lib/capability-service"
 import { purgeLegacySettings } from "./lib/settings"
 
 // Runs on every service-worker startup (install, update, browser launch, wake): an old
@@ -100,6 +107,17 @@ async function imageDataUrl(response: Response) {
 }
 
 // ---------- Message handling ----------
+
+/**
+ * Capability issuance, as its own explicit case: only this extension's own top-frame content
+ * script may ask, only for the two known scopes, and the reply is the opaque token alone.
+ * Returns the token, never the store contents.
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if ((message as { type?: unknown } | null)?.type !== ISSUE_CAPABILITY_MESSAGE) return false
+  handleIssueCapability(message, sender, { store: chrome.storage.session, runtimeId: chrome.runtime.id }).then(sendResponse)
+  return true
+})
 
 chrome.runtime.onMessage.addListener((message: OpenWearRequest, sender, sendResponse) => {
   // Only OpenWear's own pages (fitting room) may fetch images; content scripts on shops may not.

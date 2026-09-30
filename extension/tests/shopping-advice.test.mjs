@@ -152,7 +152,9 @@ test("36: stale older advice cannot overwrite a newer garment", () => {
 test("37: markOwned closes and updates advice state", () => {
   const handler = room.slice(room.indexOf("const markOwnedItem = useCallback"), room.indexOf("const tryOn = useCallback"))
   assert.ok(handler.includes("setAdviceState(null)"), "buying the item closes the advice panel")
-  assert.ok(room.includes("setAdviceState({ garmentId: id, itemId: status.itemId, phase: \"idle\" })"), "new considering garments re-arm advice")
+  // Step 4A.2: the "re-arm advice for a still-considering item" transition now lives in the
+  // canonical adoptSavedItem helper, shared by the in-room button and a page-pill save.
+  assert.ok(room.includes('setAdviceState({ garmentId, itemId: status.itemId, phase: "idle" })'), "new considering garments re-arm advice")
   assert.ok(room.includes("setAdviceState(null)") && room.includes("setStyleState(null)"), "a new garment resets advice like style state")
 })
 

@@ -58,3 +58,25 @@ function findRoomChunk(tabs) {
   }
   throw new Error("no room chunk found in the production build")
 }
+
+test("the production build contains no E2E harness markers", () => {
+  // The browser-E2E harness (extension/e2e) is overlaid onto a COPY of this build at
+  // test time; none of it may ever ship. Scan every shipped script for the markers.
+  const markers = ["__owE2e", "e2e-room", "E2E Field Jacket", "E2E Riverside Combo", "forceAuthenticated", "mockConvex", "E2E_LIVE_MIRROR_BLOCKED", "harness-reset", "e2e-auth-provider-stub", "pk_test_e2e_harness"];
+  const scripts = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = new URL(entry.name, dir);
+      if (entry.isDirectory()) walk(new URL(`${entry.name}/`, dir));
+      else if (entry.name.endsWith(".js")) scripts.push(path);
+    }
+  };
+  walk(new URL("../build/chrome-mv3-prod/", import.meta.url));
+  assert.ok(scripts.length > 0, "production scripts exist to scan");
+  for (const script of scripts) {
+    const source = readFileSync(script, "utf8");
+    for (const marker of markers) {
+      assert.ok(!source.includes(marker), `production bundle must not contain ${JSON.stringify(marker)} (${script})`);
+    }
+  }
+});

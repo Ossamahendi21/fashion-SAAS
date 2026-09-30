@@ -9,7 +9,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { PlasmoCSConfig, PlasmoGetRootContainer } from "plasmo"
 import styleText from "data-text:./style.css"
 import { canonicalSourcePageUrl, nameFromFile, parseDrop } from "./lib/drop"
-import { createHoverOverlay, OVERLAY_COPY, type HoverOverlay, type HoverTarget, type OverlayPill } from "./lib/hover-overlay"
+import { requestCapability } from "./lib/capability-client"
+import { createHoverOverlay, isExtensionOwnedUi, OVERLAY_COPY, UI_ATTR, type HoverOverlay, type HoverTarget, type OverlayPill } from "./lib/hover-overlay"
 import {
   bestImageUrl,
   buildProductTarget,
@@ -19,7 +20,6 @@ import {
 } from "./lib/product-image"
 import {
   createReplyWaiter,
-  issueCapability,
   requestRemoteSave,
   type SavePhase
 } from "./lib/wardrobe-save"
@@ -35,6 +35,9 @@ export const getRootContainer: PlasmoGetRootContainer = async () => {
   await new Promise(resolve => setTimeout(resolve, 400))
   document.querySelectorAll("openwear-root").forEach(stale => stale.remove())
   const host = document.createElement("openwear-root")
+  // Ownership marker: pointer events entering our Shadow DOM are retargeted to this host, so
+  // it must be recognizable as extension UI or the pill hides itself before it can be clicked.
+  host.setAttribute(UI_ATTR, "host")
   host.style.cssText = "all: initial; position: fixed; top: 0; left: 0; width: 0; height: 0; z-index: 2147483646;"
   const shadow = host.attachShadow({ mode: "open" })
   const style = document.createElement("style")
@@ -153,6 +156,9 @@ function OpenWearShell() {
   const [moving, setMoving] = useState(false)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const draggedRef = useRef<DraggedGarment | null>(null)
+  // A docked (never dragged/resized) room hugs the right edge, so a viewport change
+  // re-anchors it there instead of stranding it mid-canvas over page content.
+  const dockedRef = useRef(true)
   const openRef = useRef(open)
   openRef.current = open
   // ---------- Contextual shopping actions (Step 3B) ----------
@@ -162,6 +168,7 @@ function OpenWearShell() {
   const overlayRef = useRef<HoverOverlay | null>(null)
   const pillRef = useRef<OverlayPill | null>(null)
   const lastHoverImgRef = useRef<HTMLImageElement | null>(null)
+  const pointerPosRef = useRef<{ x: number; y: number } | null>(null)
   const roomReadyRef = useRef(false)
   const pendingTryOnRef = useRef<{ file?: Blob; url?: string; name?: string; sourcePageUrl?: string; capability: string } | null>(null)
   const pendingSaveRef = useRef<{ targetKey: string; clientImportId: string } | null>(null)
@@ -182,7 +189,7 @@ function OpenWearShell() {
   const forwardGarment = useCallback(async (base: { file?: Blob; url?: string; name?: string; sourcePageUrl?: string }) => {
     let capability: string
     try {
-      capability = await issueCapability(chrome.storage.session, "garment")
+      capability = await requestCapability("garment")
     } catch {
       return
     }
@@ -217,8 +224,15 @@ function OpenWearShell() {
       {
         openRoom: () => { if (!openRef.current) setOpen(true) },
         postToRoom,
-        awaitRoomReady: (timeoutMs) => readyWaiterRef.current.wait("ready", timeoutMs ?? 5000, false),
-        issueToken: () => issueCapability(chrome.storage.session, "save"),
+        // Ping rather than wait passively: the room only announces readiness on mount, and by
+        // the time a save starts the room is usually already open, so an unsolicited reply
+        // would never come. The waiter is registered first so a fast reply cannot be missed.
+        awaitRoomReady: (timeoutMs) => {
+          const ready = readyWaiterRef.current.wait("ready", timeoutMs ?? 5000, false)
+          postToRoom({ type: "openwear:room-ping" })
+          return ready
+        },
+        issueToken: () => requestCapability("save"),
         awaitSaveStatus: (id, timeoutMs) => saveWaiterRef.current.wait(id, timeoutMs ?? 150000, "timeout")
       },
       {
@@ -230,6 +244,10 @@ function OpenWearShell() {
     )
     // A retargeted overlay owns newer UI; stale completions stay silent.
     if (pendingSaveRef.current?.clientImportId !== clientImportId) return
+    // The pill may have retargeted to another product while this save was in flight
+    // (hover resets it to idle but starts no save, so the id above still matches).
+    // Painting "Saved" onto a different product's pill would be a lie: stay silent.
+    if (overlayRef.current?.current && overlayRef.current.current.key !== target.key) return
     const live = pillRef.current
     if (!live) return
     if (phase === "ready") live.setSaveState("done", OVERLAY_COPY.saved)
@@ -249,7 +267,7 @@ function OpenWearShell() {
       if (message.type?.startsWith("openwear:")) sendResponse({ ok: true })
     }
     chrome.runtime.onMessage.addListener(listener)
-    const onResize = () => setRect(current => clampRect(current))
+    const onResize = () => setRect(current => dockedRef.current ? defaultRect() : clampRect(current))
     window.addEventListener("resize", onResize)
     return () => { chrome.runtime.onMessage.removeListener(listener); window.removeEventListener("resize", onResize) }
   }, [])
@@ -332,11 +350,22 @@ function OpenWearShell() {
     if (!open) roomReadyRef.current = false
   }, [open ])
 
+  // Track the pointer even while the overlay is disabled: re-arming needs to re-probe the
+  // element under a stationary cursor (a toggle lands with the mouse already parked).
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      pointerPosRef.current = { x: event.clientX, y: event.clientY }
+    }
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
+    return () => window.removeEventListener("pointermove", onPointerMove)
+  }, [])
+
   useEffect(() => {
     if (!actionsEnabled) {
       overlayRef.current?.teardown()
       overlayRef.current = null
       pillRef.current = null
+      lastHoverImgRef.current = null
       return
     }
     const shadow = document.querySelector("openwear-root")?.shadowRoot
@@ -354,7 +383,7 @@ function OpenWearShell() {
       onVisibility: (visible) => {
         if (visible) {
           if (!domObserverRef.current) {
-            domObserverRef.current = new MutationObserver(() => overlayRef.current?.reposition())
+            domObserverRef.current = new MutationObserver(() => refreshParked())
           }
           domObserverRef.current.observe(document, { childList: true, subtree: true })
         } else {
@@ -405,6 +434,38 @@ function OpenWearShell() {
       }
     }
 
+    // A DOM change while the pill is visible (SPA swap, hydration, lazy load) can replace the
+    // anchored image under a stationary cursor: no pointerover fires, so re-probe the parked
+    // point and retarget if a different eligible product now sits there.
+    const refreshParked = () => {
+      const parked = pointerPosRef.current
+      if (!parked) {
+        overlayRef.current?.reposition()
+        return
+      }
+      const under = document.elementFromPoint(parked.x, parked.y)
+      if (!(under instanceof HTMLImageElement) || !under.isConnected) {
+        overlayRef.current?.reposition()
+        return
+      }
+      const current = overlayRef.current?.current
+      if (current && !current.alive()) {
+        // The anchored node died (SPA swap replaced it). Same-key dedupe would swallow a
+        // retarget on the replacement, so clear the overlay first, then re-probe.
+        overlayRef.current?.hide()
+        lastHoverImgRef.current = under
+        const target = findTarget(under)
+        if (target) overlayRef.current?.hover(target)
+        return
+      }
+      if (under === lastHoverImgRef.current) {
+        overlayRef.current?.reposition()
+        return
+      }
+      lastHoverImgRef.current = under
+      overlayRef.current?.hover(findTarget(under))
+    }
+
     // One delegated listener: per-image listeners are forbidden (thousands of images per page).
     const onPointerOver = (event: PointerEvent) => {
       if (!actionsEnabledRef.current || isExcludedContext()) return
@@ -423,7 +484,7 @@ function OpenWearShell() {
       const img = lastHoverImgRef.current
       if (!img || event.target !== img) return
       const related = event.relatedTarget
-      if (related instanceof Element && related.closest("[data-ow-ui]")) return
+      if (isExtensionOwnedUi(related)) return
       lastHoverImgRef.current = null
       overlayRef.current?.hide()
     }
@@ -439,6 +500,16 @@ function OpenWearShell() {
     window.addEventListener("scroll", onScrollResize, { passive: true, capture: true })
     window.addEventListener("resize", onScrollResize)
     document.addEventListener("keydown", onKeyDown)
+    // Re-armed (toggle flipped back on, or first enable): if the cursor is already parked on
+    // a product, no new pointerover will fire, so probe the element under it directly.
+    const parked = pointerPosRef.current
+    if (parked) {
+      const under = document.elementFromPoint(parked.x, parked.y)
+      if (under instanceof HTMLImageElement) {
+        lastHoverImgRef.current = under
+        overlayRef.current?.hover(findTarget(under))
+      }
+    }
     return () => {
       document.removeEventListener("pointerover", onPointerOver)
       document.removeEventListener("pointerout", onPointerOut)
@@ -449,6 +520,7 @@ function OpenWearShell() {
       overlayRef.current?.teardown()
       overlayRef.current = null
       pillRef.current = null
+      lastHoverImgRef.current = null
     }
   }, [actionsEnabled, sendTryOn, sendSave])
 
@@ -458,6 +530,7 @@ function OpenWearShell() {
     event.preventDefault()
     const startX = event.clientX, startY = event.clientY, origin = rect
     setMoving(true)
+    dockedRef.current = false
     const move = (next: PointerEvent) => setRect(clampRect({ ...origin, x: origin.x + next.clientX - startX, y: origin.y + next.clientY - startY }))
     const end = () => { setMoving(false); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end) }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", end)
@@ -467,6 +540,7 @@ function OpenWearShell() {
     event.preventDefault()
     const startX = event.clientX, startY = event.clientY, origin = rect
     setMoving(true)
+    dockedRef.current = false
     const move = (next: PointerEvent) => setRect(clampRect({ ...origin, x: origin.x + (next.clientX - startX), width: origin.width - (next.clientX - startX), height: origin.height + next.clientY - startY }))
     const end = () => { setMoving(false); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", end) }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", end)

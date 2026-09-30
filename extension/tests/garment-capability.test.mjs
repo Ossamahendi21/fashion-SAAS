@@ -196,7 +196,13 @@ test("16: no JWT, Clerk, or service secrets in the capability mechanism", () => 
 // ---------- Wiring: content posts capabilities, room gates on them ----------
 
 test("every content garment post carries a fresh capability", () => {
-  assert.ok(content.includes("issueCapability(chrome.storage.session, \"garment\")"), "capabilities minted in the page")
+  // Step 4A.1: the content script can no longer mint — chrome.storage.session is not
+  // exposed to content scripts — so it requests a fresh token from the service worker on
+  // every post. Minting and storage.session access live exclusively in trusted contexts.
+  assert.ok(content.includes('requestCapability("garment")'), "capabilities requested from the service worker")
+  assert.ok(content.includes("chrome.storage.session") === false, "the page never touches session storage")
+  const background = read("background.ts")
+  assert.ok(background.includes("store: chrome.storage.session"), "the worker mints into session storage")
   const posts = [...content.matchAll(/type: "openwear:garment"/g)]
   assert.ok(posts.length >= 1)
   const forward = content.slice(content.indexOf("const forwardGarment"), content.indexOf("/** Try on:"))
