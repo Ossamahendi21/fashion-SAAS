@@ -14,6 +14,17 @@ export const SERVER_ENV_KEYS = [
   "LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_CAP",
   /** "1" enables the internal smoke-test functions in `convex/dev/smoke.ts`; unset everywhere but a scratch deployment. */
   "ALLOW_DEV_SMOKE",
+  /**
+   * Which provider cuts garment cutouts: "openai" (default) or "withoutbg". Server-only: read in
+   * `convex/ai/extraction.ts` and never exposed to the client.
+   */
+  "EXTRACTION_PROVIDER",
+  /** Server-only self-hosted withoutBG gateway base URL (never NEXT_PUBLIC_). */
+  "WITHOUTBG_BASE_URL",
+  /** Server-only private gateway key for the withoutBG gateway (never NEXT_PUBLIC_, never in logs). */
+  "WITHOUTBG_API_KEY",
+  /** Operator-estimated self-host cost per extraction, recorded as COGS like OpenAI usage would be. */
+  "WITHOUTBG_COST_USD_PER_IMAGE",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];

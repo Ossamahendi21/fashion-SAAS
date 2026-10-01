@@ -6,14 +6,19 @@ import type { ImageEditParamsNonStreaming, ImagesResponse } from "openai/resourc
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { internalAction, type ActionCtx } from "../_generated/server";
-import { optionalEnv, requireEnv } from "../lib/env";
+import { envNumber, optionalEnv, requireEnv } from "../lib/env";
 import { appError, isAppError } from "../lib/errors";
 import { EMBEDDING_DIMENSIONS } from "../schema";
-import { LIMITS, type TokenUsage } from "../shared/credits";
+import { LIMITS, usageToUsd, type TokenUsage } from "../shared/credits";
 import { INGEST_STEPS } from "../shared/jobs";
 import { vDetectedItem, vRawStylingSuggestion, type RawStylingSuggestion } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
+import {
+  extractGarmentCutout,
+  type ExtractionRunners,
+  withoutBgExtract,
+} from "./extraction";
 import { normalizeImageInput } from "./image_input";
 import {
   coerceAdviceResponse,
@@ -314,8 +319,9 @@ export const summarizeShoppingAdvice = internalAction({
   },
 });
 /**
- * One item: cut it out of its source photo, store the PNG, read its swatches, embed it and flag it
- * as a duplicate of an existing item when the vectors all but match.
+ * One item: cut it out of its source photo through the extraction seam, store the PNG, read its
+ * swatches, embed it and flag it as a duplicate of an existing item when the vectors all but match.
+ * The seam dispatches on EXTRACTION_PROVIDER (default gpt-image-2); there is no failover.
  */
 export const extractItem = internalAction({
   args: { itemId: v.id("items"), jobId: v.id("jobs"), stepKey: v.string() },
@@ -331,15 +337,16 @@ export const extractItem = internalAction({
       const photo = await ctx.storage.get(item.photoStorageId);
       if (!photo) throw appError("NOT_FOUND", "The source photo for this item is gone.");
 
-      const response = await editWithTransparency({
-        image: await toImageFile(photo, "photo"),
-        prompt: extractionPrompt(item.description),
-        size: "1024x1024",
-        quality: "medium",
-      });
-      const { bytes, usage } = decodeImage(response);
-      const storageId = await ctx.storage.store(pngBlob(bytes));
-      const hex = dominantHex(bytes, 3);
+      const cutout = await extractGarmentCutout(
+        {
+          imageBytes: await normalizeImageInput(photo, "photo"),
+          imageName: "photo",
+          prompt: extractionPrompt(item.description),
+        },
+        extractionRunners(),
+      );
+      const storageId = await ctx.storage.store(pngBlob(cutout.bytes));
+      const hex = dominantHex(cutout.bytes, 3);
 
       const embedding = await embedText(embeddingInput(item, hex));
       const matches = await ctx.vectorSearch("itemEmbeddings", "by_embedding", {
@@ -365,7 +372,8 @@ export const extractItem = internalAction({
         stepKey: args.stepKey,
         storageId,
         hex,
-        usage,
+        usage: cutout.usage,
+        costUsd: cutout.costUsd,
         embedding,
         duplicateOfId,
       });
@@ -381,6 +389,39 @@ export const extractItem = internalAction({
     }
   },
 });
+
+/**
+ * The provider implementations behind the seam. GPT-4's `gpt-image-2` branch keeps its transparent-
+ * then-opaque retry and bills from real SDK usage; withoutBG bills a fixed operator-set cost because
+ * a self-hosted gateway has no token accounting to quote.
+ */
+function extractionRunners(): ExtractionRunners {
+  return {
+    openai: async (request) => {
+      const started = Date.now();
+      const { response, background } = await editWithTransparency({
+        image: await toFile(request.imageBytes, request.imageName, { type: "image/png" }),
+        prompt: request.prompt,
+        size: "1024x1024",
+        quality: "medium",
+      });
+      const { bytes, usage } = decodeImage(response);
+      return { bytes, usage, background, costUsd: usageToUsd(usage), latencyMs: Date.now() - started };
+    },
+    withoutbg: async (request) => {
+      const cut = await withoutBgExtract(
+        { bytes: request.imageBytes, prompt: request.prompt },
+        {
+          baseUrl: requireEnv("WITHOUTBG_BASE_URL"),
+          apiKey: requireEnv("WITHOUTBG_API_KEY"),
+          costUsdPerImage: envNumber("WITHOUTBG_COST_USD_PER_IMAGE", 0.001),
+          timeoutMs: REQUEST_TIMEOUT_MS,
+        },
+      );
+      return { bytes: cut.bytes, background: cut.background, costUsd: cut.costUsd, latencyMs: cut.latencyMs };
+    },
+  };
+}
 
 /** One try-on image: the avatar plus every garment cutout as references, one prompt. */
 export const renderImage = internalAction({
@@ -491,13 +532,16 @@ async function editImage(request: EditRequest): Promise<ImagesResponse> {
  * Transparent backgrounds are a preview flag on gpt-image-2: when the account or snapshot doesn't
  * have it the request 4xxs, so redo the same edit opaque rather than failing the item. Only that
  * error is retried — a content-policy or bad-image 400 must not buy a second paid attempt.
+ * Returns which background the response actually carries so extraction cost stays honest.
  */
-async function editWithTransparency(request: Omit<EditRequest, "background">): Promise<ImagesResponse> {
+async function editWithTransparency(
+  request: Omit<EditRequest, "background">,
+): Promise<{ response: ImagesResponse; background: "transparent" | "opaque" }> {
   try {
-    return await editImage({ ...request, background: "transparent" });
+    return { response: await editImage({ ...request, background: "transparent" }), background: "transparent" };
   } catch (error) {
     if (!isBackgroundParamError(error)) throw error;
-    return editImage({ ...request, background: "opaque" });
+    return { response: await editImage({ ...request, background: "opaque" }), background: "opaque" };
   }
 }
 

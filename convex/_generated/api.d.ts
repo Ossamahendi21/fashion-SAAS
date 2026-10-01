@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as agent from "../agent.js";
 import type * as ai_colours from "../ai/colours.js";
+import type * as ai_extraction from "../ai/extraction.js";
 import type * as ai_image_input from "../ai/image_input.js";
 import type * as ai_openai from "../ai/openai.js";
 import type * as ai_pipeline from "../ai/pipeline.js";
@@ -75,6 +76,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agent: typeof agent;
   "ai/colours": typeof ai_colours;
+  "ai/extraction": typeof ai_extraction;
   "ai/image_input": typeof ai_image_input;
   "ai/openai": typeof ai_openai;
   "ai/pipeline": typeof ai_pipeline;

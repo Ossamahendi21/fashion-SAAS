@@ -132,17 +132,25 @@ export async function insertDetectedItem(
 export async function markItemReady(
   ctx: MutationCtx,
   itemId: Id<"items">,
-  result: { storageId: Id<"_storage">; thumbStorageId?: Id<"_storage">; hex?: string[]; usage?: TokenUsage },
+  result: {
+    storageId: Id<"_storage">;
+    thumbStorageId?: Id<"_storage">;
+    hex?: string[];
+    usage?: TokenUsage;
+    /** Provider-specific COGS for providers without SDK token accounting (self-hosted withoutBG). */
+    costUsd?: number;
+  },
 ): Promise<void> {
   const item = await ctx.db.get(itemId);
   if (!item) return;
   const usageUsd = result.usage ? usageToUsd(result.usage) : 0;
+  const costUsd = result.costUsd ?? (result.usage ? usageUsd : item.costUsd);
   await ctx.db.patch(itemId, {
     storageId: result.storageId,
     thumbStorageId: result.thumbStorageId,
     colours: result.hex ? { ...item.colours, hex: result.hex } : item.colours,
     usage: result.usage,
-    costUsd: result.usage ? usageUsd : item.costUsd,
+    costUsd,
     status: "ready",
     pendingJobId: undefined,
     updatedAt: Date.now(),
@@ -151,7 +159,7 @@ export async function markItemReady(
   if (item.thumbStorageId && item.thumbStorageId !== result.thumbStorageId) {
     await deleteFile(ctx, item.thumbStorageId);
   }
-  await bumpDailyStats(ctx, { itemsExtracted: 1, cogsUsd: usageUsd });
+  await bumpDailyStats(ctx, { itemsExtracted: 1, cogsUsd: costUsd });
 }
 
 /**

@@ -335,18 +335,25 @@ export const itemReady = internalMutation({
     stepKey: v.string(),
     storageId: v.id("_storage"),
     hex: v.array(v.string()),
-    usage: vTokenUsage,
+    usage: v.optional(vTokenUsage),
+    /** Provider-specific COGS for providers without SDK token accounting (self-hosted withoutBG). */
+    costUsd: v.optional(v.number()),
     embedding: v.array(v.float64()),
     duplicateOfId: v.optional(v.id("items")),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
-    await markItemReady(ctx, args.itemId, { storageId: args.storageId, hex: args.hex, usage: args.usage });
+    await markItemReady(ctx, args.itemId, {
+      storageId: args.storageId,
+      hex: args.hex,
+      usage: args.usage,
+      costUsd: args.costUsd,
+    });
     await setItemEmbedding(ctx, args.itemId, args.embedding, args.duplicateOfId);
     await appendResult(ctx, args.jobId, args.itemId);
     await setStep(ctx, args.jobId, args.stepKey, {
       status: "done",
-      meta: { itemId: args.itemId, costUsd: usageToUsd(args.usage) },
+      meta: { itemId: args.itemId, costUsd: args.costUsd ?? (args.usage ? usageToUsd(args.usage) : 0) },
     });
     return null;
   },

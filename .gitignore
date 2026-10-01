@@ -56,3 +56,6 @@ Claude outputs/
 artifacts/verification/
 /verification/
 /.codex/
+
+# Extraction benchmark artifacts (generated fixtures and reports, never committed)
+bench/extraction/.out/
