@@ -50,6 +50,26 @@ const garmentInput = (overrides = {}) => ({
 
 // ---------- Upload protocol ----------
 
+test("Step 3E: a Blob declaring SVG (or any non-raster image type) is refused before upload", async () => {
+  const { calls, deps } = fakeDeps()
+  const wardrobe = saver.createWardrobeSaver(deps)
+  // An SVG can execute in whatever renderer takes it, so the client-upload gate declines it
+  // exactly the way normalizeImage, parseDrop and the server fetch allowlist do.
+  await assert.rejects(
+    wardrobe.save(garmentInput({ blob: new Blob(["<svg/>"], { type: "image/svg+xml" }) })),
+    /JPG, PNG or WebP/i,
+    "declared SVG must never reach the signed-URL upload"
+  )
+  await assert.rejects(
+    wardrobe.save(garmentInput({ blob: new Blob(["not an image"], { type: "text/html" }) })),
+    /JPG, PNG or WebP/i,
+    "any declared non-raster type is refused"
+  )
+  assert.equal(calls.generateUploadUrl, 0, "no upload URL is minted for a refused Blob")
+  assert.equal(calls.postBlob.length, 0, "nothing is POSTed")
+  assert.equal(calls.register.length, 0, "nothing is registered")
+})
+
 test("21/22: save uploads the current normalized Blob with its MIME and size", async () => {
   const { calls, deps } = fakeDeps()
   const wardrobe = saver.createWardrobeSaver(deps)
@@ -303,26 +323,34 @@ test("reply waiters match responses to requests with timeouts", async () => {
 })
 
 function remoteSaver({ terminal = "ready" } = {}) {
-  const calls = { save: [], watch: 0 }
+  const calls = { register: [], watch: 0, uploadUrl: 0, postBlob: 0 }
   return {
     calls,
     saver: {
-      save: async (input) => { calls.save.push(input); return { uploadId: "uploads-9", jobId: "jobs-9" } },
+      // Step 3: a remote save never uploads client-side; the server holds the bytes. The local
+      // upload path stays reachable only for genuine file drops, so a remote save touching it
+      // would be a regression.
+      save: async (input) => { calls.uploadUrl += 1; return { uploadId: "uploads-9", jobId: "jobs-9", ...input } },
+      generateUploadUrl: async () => { calls.uploadUrl += 1; return "https://convex.invalid/upload" },
+      postBlob: async () => { calls.postBlob += 1; return "storage-9" },
+      registerImport: async (input) => { calls.register.push(input); return { uploadId: "uploads-9", jobId: "jobs-9", deduped: false } },
       watch: async () => { calls.watch++; return terminal }
     }
   }
 }
 
-const remoteDeps = (overrides = {}) => ({
-  isSignedIn: () => true,
-  openSignIn: () => {},
-  fetchImageDataUrl: async () => "data:image/jpeg;base64,/9j/",
-  normalizeImage: async () => ({ blob: new Blob(["x"], { type: "image/jpeg" }) }),
-  takeToken: async () => true,
-  saver: remoteSaver().saver,
-  reply: () => {},
-  ...overrides
-})
+const remoteDeps = (overrides = {}) => {
+  const { saver } = remoteSaver()
+  return {
+    isSignedIn: () => true,
+    openSignIn: () => {},
+    takeToken: async () => true,
+    remoteImage: { registerRemote: async () => ({ uploadId: "uploads-9", jobId: "jobs-9" }) },
+    saver,
+    reply: () => {},
+    ...overrides
+  }
+}
 
 const remoteInput = (overrides = {}) => ({
   imageUrl: "https://shop.example.com/images/blue.jpg",
@@ -335,14 +363,27 @@ const remoteInput = (overrides = {}) => ({
 
 test("room-side save validates, consumes the token, and replies with the terminal phase", async () => {
   const replies = []
+  const registered = []
   const { calls, saver: fake } = remoteSaver({ terminal: "needs_credits" })
-  await saver.saveRemoteGarment({ ...remoteDeps({ saver: fake, reply: (phase) => replies.push(phase) }), takeToken: async (token) => {
-    assert.equal(token, "save-token-9")
-    return true
-  } }, remoteInput())
-  assert.equal(calls.save.length, 1)
-  assert.equal(calls.save[0].fileName, "blue.jpg")
-  assert.equal(calls.save[0].clientImportId, "client-import-9")
+  await saver.saveRemoteGarment({
+    ...remoteDeps({
+      saver: fake,
+      reply: (phase) => replies.push(phase),
+      remoteImage: { registerRemote: async (url, input) => { registered.push({ url, input }); return { uploadId: "uploads-9", jobId: "jobs-9" } } },
+    }),
+    takeToken: async (token) => {
+      assert.equal(token, "save-token-9")
+      return true
+    }
+  }, remoteInput())
+  assert.equal(registered.length, 1, "the server boundary is called exactly once")
+  assert.equal(registered[0].url, "https://shop.example.com/images/blue.jpg", "only the public URL crosses the boundary")
+  assert.equal(registered[0].input.clientImportId, "client-import-9")
+  assert.equal(registered[0].input.productTitle, "Blue Shirt")
+  assert.equal(registered[0].input.sourcePageUrl, "https://shop.example.com/p/1")
+  assert.equal(calls.watch, 1, "the registered upload is watched to its terminal phase")
+  assert.equal(calls.uploadUrl, 0, "nothing is uploaded from the client")
+  assert.equal(calls.postBlob, 0, "no client-side blob store call")
   assert.deepEqual(replies, ["needs_credits"])
 })
 
@@ -354,9 +395,16 @@ test("room-side save silently ignores malformed or forged requests", async () =>
     remoteInput({ token: 42 })
   ]) {
     const replies = []
-    const { calls, saver: fake } = remoteSaver()
-    await saver.saveRemoteGarment({ ...remoteDeps({ saver: fake, reply: (phase) => replies.push(phase) }) }, bad)
-    assert.equal(calls.save.length, 0, "no saver call for malformed input")
+    const registered = []
+    const { saver: fake } = remoteSaver()
+    await saver.saveRemoteGarment({
+      ...remoteDeps({
+        saver: fake,
+        reply: (phase) => replies.push(phase),
+        remoteImage: { registerRemote: async () => { registered.push(1); return { uploadId: "uploads-9", jobId: "jobs-9" } } }
+      })
+    }, bad)
+    assert.equal(registered.length, 0, "no server call for malformed input")
     assert.deepEqual(replies, [], "no reply leaks anything to a hostile sender")
   }
   const replies = []
@@ -375,14 +423,17 @@ test("room-side save opens sign-in and replies without touching the saver when s
   }, remoteInput())
   assert.equal(signInOpened, 1)
   assert.deepEqual(replies, ["signed_out"])
-  assert.equal(calls.save.length, 0, "nothing is uploaded while signed out")
+  assert.equal(calls.uploadUrl, 0, "nothing is uploaded while signed out")
+  assert.equal(calls.watch, 0, "no save is started while signed out")
 })
 
-test("room-side save replies failed when the pipeline throws", async () => {
+test("room-side save replies failed when the server boundary throws", async () => {
   const replies = []
   await saver.saveRemoteGarment({
-    ...remoteDeps({ reply: (phase) => replies.push(phase) }),
-    fetchImageDataUrl: async () => { throw new Error("private image URL") }
+    ...remoteDeps({
+      reply: (phase) => replies.push(phase),
+      remoteImage: { registerRemote: async () => { throw new Error("private image URL") } }
+    }),
   }, remoteInput())
   assert.deepEqual(replies, ["failed"])
 })

@@ -46,14 +46,20 @@ test("no authored module references a server secret", () => {
   }
 })
 
-test("no background token minting: the worker only fetches images", () => {
+test("no background token minting, and the worker no longer fetches images either", () => {
   const source = codeOf("background.ts")
   assert.ok(!source.includes('"test-key"'), "the test-key message is gone")
   assert.ok(!source.includes('"token"'), "the token message is gone")
   assert.ok(!source.includes('"status"'), "the key-status message is gone")
   assert.ok(!source.includes("loadSettings"), "the worker reads no settings at all")
   assert.ok(!source.includes("api.decart.ai"), "the worker never calls the provider")
-  assert.ok(source.includes('case "image"'), "image fetching remains")
+  // Step 3 moved retail-image fetching server-side (convex/lib/imageFetch.ts). The worker keeps
+  // only capability minting and install-time injection, so it has no fetch path at all.
+  assert.ok(!source.includes('case "image"'), "the image message handler is gone")
+  assert.ok(!source.includes("fetch("), "the worker performs no network fetch")
+  assert.ok(!source.includes("data:image"), "the worker never builds data URLs")
+  assert.ok(source.includes("handleIssueCapability"), "capability minting remains the worker's job")
+  assert.ok(source.includes("chrome.scripting.executeScript"), "install-time content-script injection remains")
 })
 
 test("no apiKey storage field anywhere in authored code", () => {

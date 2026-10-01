@@ -16,6 +16,8 @@ import { fitcheckSignInUrl, getAuthConfig, isAuthConfigured, type ExtensionAuthS
 import { ExtensionAuthProvider, useExtensionAuthStatus } from "../lib/auth-provider"
 import { nameFromFile, parseDrop, type Incoming } from "../lib/drop"
 import { buildPrompt, cleanName, normalizeImage } from "../lib/garment"
+import { createOriginGuardCore, fromParent } from "../lib/room-origin"
+import { createRemoteImageClient, type RemoteImageClient, type RemoteImageDeps } from "../lib/remote-image"
 import {
   authorizeLiveMirror,
   createLiveMirrorAuthorizer,
@@ -73,10 +75,10 @@ import {
   type WardrobeSaveDeps
 } from "../lib/wardrobe-save"
 import { DEFAULT_SETTINGS, loadSettings } from "../lib/settings"
+import { fetchRemoteServerImage, discardServerImage } from "../lib/wardrobe-save"
 import { createPoseTracker, coverRect, guide, silhouetteBox, SILHOUETTE, type Point } from "../lib/vision"
 import "./room.css"
 
-type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
 type Phase = "idle" | "starting" | "framing" | "ready"
 type GarmentStatus = "reading" | "waiting" | "fitting" | "live" | "failed"
 type Garment = {
@@ -88,6 +90,10 @@ type Garment = {
   fileName: string
   /** Canonical shop page the garment was dragged from, if any. Provenance only. */
   sourcePageUrl?: string
+  /** Server-fetched (Step 3) garments carry the server storage identity for direct registration. */
+  storageId?: string
+  mimeType?: string
+  sizeBytes?: number
   /** Idempotency key for wardrobe saves of this garment. New garment, new id. */
   clientImportId: string
 }
@@ -122,21 +128,9 @@ function RoomAuthBadge() {
   return <small>Signed in · Convex {status.convexAuthenticated ? "connected" : "connecting…"}</small>
 }
 
-/** Posts to the embedding shop page, if this room is actually iframed. Payloads carry no secrets. */
-function postToParent(message: Record<string, unknown>) {
-  if (typeof window !== "undefined" && window.parent !== window) window.parent.postMessage(message, "*")
-}
-
 /** Opens the Fitcheck sign-in page on the web app, where the Clerk session actually lives. */
 function signInOnFitcheck() {
   void chrome.tabs.create({ url: fitcheckSignInUrl(getAuthConfig()) })
-}
-
-/** Sends an image request to background.ts, which fetches garment images without site cookies. */
-async function background<T>(type: string, fields: Record<string, unknown> = {}): Promise<T> {
-  const response: Reply<T> = await chrome.runtime.sendMessage({ type, ...fields })
-  if (!response?.ok) throw new Error((response as { error?: string })?.error || "OpenWear is unavailable")
-  return response.data
 }
 
 /** Maps camera, key and network failures to a message plus the one action that fixes it. */
@@ -210,6 +204,17 @@ function RoomWithAuth() {
   // Should-I-buy-this: one authenticated analysis per click. Never saves, uploads,
   // styles, or authorizes Live Mirror — the server derives everything from the item id.
   const adviceAction = useAction(requestShoppingAdvice)
+  const remoteImageClient = useMemo<RemoteImageClient>(
+    () =>
+      createRemoteImageClient({
+        fetchRemote: (url) => convex.action(fetchRemoteServerImage, { url }),
+        readBlob: (downloadUrl) => fetch(downloadUrl).then((res) => res.blob()),
+        normalizeImage,
+        registerImport,
+        discardRemote: (storageId) => convex.action(discardServerImage, { storageId })
+      }),
+    [convex, normalizeImage, registerImport]
+  )
   return (
     <Room
       authStatus={status}
@@ -221,6 +226,7 @@ function RoomWithAuth() {
       saveOutfitProposal={(args) => saveOutfitAction(args)}
       markOwned={(args) => markOwnedAction(args)}
       requestAdvice={(args) => adviceAction(args)}
+      remoteImage={remoteImageClient}
     />
   )
 }
@@ -228,7 +234,7 @@ function RoomWithAuth() {
 /** Room body with all platform effects injected as props, so the browser E2E harness can
  * mount the real component with stub adapters. Exported for the test-only harness entry;
  * production behavior is unchanged. */
-export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal, markOwned, requestAdvice }: {
+export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaStatus, wardrobeSave, requestStyling, saveOutfitProposal, markOwned, requestAdvice, remoteImage }: {
   authStatus: ExtensionAuthStatus | null
   liveMirrorAction: (args: Record<string, never>) => Promise<LiveMirrorAuthorization>
   refreshBilling?: () => Promise<unknown>
@@ -238,6 +244,7 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
   saveOutfitProposal: (args: { outfitId: string }) => Promise<null>
   markOwned: (args: { itemId: string }) => Promise<null>
   requestAdvice: (args: { itemId: string }) => Promise<ShoppingAdvice>
+  remoteImage: RemoteImageClient
 }) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -337,6 +344,20 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
   phaseRef.current = phase
   garmentRef.current = garment
 
+  // Parent-origin gate (Step 3, Requirement B): messages are processed only once the shop
+  // page's origin has been browser-verified via the openwear:origin handshake and then only
+  // when event.origin matches exactly. Outgoing posts target that verified origin, never "*",
+  // once it is known.
+  const originGuard = useMemo(() => createOriginGuardCore(), [])
+  const parentRef = useRef<Window | null>(typeof window !== "undefined" ? window.parent : null)
+  const postToParent = useCallback((message: Record<string, unknown>) => {
+    if (!parentRef.current || parentRef.current === window) return
+    parentRef.current.postMessage(message, originGuard.targetOrigin())
+  }, [originGuard])
+  // A server-fetched blob from an older garment is discarded when a newer garment replaces it,
+  // unless a save already registered it (discard is a reference-safe no-op server-side).
+  const priorStorageRef = useRef<string | null>(null)
+
   const updateGarment = useCallback((id: number, patch: Partial<Garment>) => {
     setGarment(current => current && current.id === id ? { ...current, ...patch } : current)
   }, [])
@@ -399,6 +420,16 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
     window.addEventListener("pagehide", onUnload)
     return () => { chrome.storage.onChanged.removeListener(onStorage); document.removeEventListener("visibilitychange", onHidden); window.removeEventListener("pagehide", onUnload); stop() }
   }, [stop])
+
+  // The pending server-fetched blob (try-on, never saved) is discarded when the room closes.
+  // discardFetch no-ops when an uploads row already references the storage id (a completed
+  // save), so a registered garment is never deleted here.
+  useEffect(() => {
+    return () => {
+      const pending = priorStorageRef.current
+      if (pending) void remoteImage.discard(pending).catch(() => {})
+    }
+  }, [remoteImage])
 
   // Initial allowance display: one read-only status load once the account is connected. No
   // polling, no token mint, no provider call. Any failure (including stale billing) leaves the
@@ -705,14 +736,25 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
     }
     applyPhase("saving")
     try {
-      const input: { blob: Blob; fileName: string; productTitle?: string; sourcePageUrl?: string; clientImportId: string } = {
-        blob,
-        fileName: current.fileName,
-        clientImportId
-      }
-      if (current.name) input.productTitle = current.name
-      if (current.sourcePageUrl) input.sourcePageUrl = current.sourcePageUrl
-      const { uploadId } = await saver.save(input)
+      const { uploadId } = current.storageId && current.mimeType
+        ? // Step 3, Requirement A: the server already holds the bytes. Register the same storage
+          // blob directly — no client upload, no duplicate fetch.
+          await remoteImage.registerBlob(
+            { storageId: current.storageId, mimeType: current.mimeType, sizeBytes: current.sizeBytes ?? 0 },
+            {
+              clientImportId,
+              fileName: current.fileName,
+              ...(current.name ? { productTitle: current.name } : {}),
+              ...(current.sourcePageUrl ? { sourcePageUrl: current.sourcePageUrl } : {})
+            }
+          )
+        : await saver.save({
+            blob,
+            fileName: current.fileName,
+            clientImportId,
+            ...(current.name ? { productTitle: current.name } : {}),
+            ...(current.sourcePageUrl ? { sourcePageUrl: current.sourcePageUrl } : {})
+          })
       if (garmentRef.current?.id !== id) return
       applyPhase("processing")
       const terminal = await saver.watch(uploadId, {
@@ -730,7 +772,7 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
       applyPhase("failed")
       setNotice({ message: toSaveFailureMessage(error) })
     }
-  }, [saver, wardrobeSave, adoptSavedItem])
+  }, [saver, wardrobeSave, adoptSavedItem, remoteImage])
 
   /**
    * Style the saved wardrobe item: one authenticated styling request per click through the
@@ -872,10 +914,29 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
     if (phaseRef.current === "idle") void start()
     // The scan only runs once the user is framed; apply() starts it.
     try {
-      const prepared = incoming.file ? await normalizeImage(incoming.file) : await normalizeImage(await background<string>("image", { url: incoming.url }))
-      if (garmentRef.current?.id !== id) return
+      let prepared: { blob: Blob; preview: string } | null = null
+      let storage: { storageId: string; mimeType: string; sizeBytes: number } | null = null
+      if (incoming.file) {
+        prepared = await normalizeImage(incoming.file)
+      } else if (incoming.url) {
+        // Step 3, Requirement A: images are fetched and stored SERVER-side. The room only
+        // downloads the stored bytes and normalizes them for the Decart reference image.
+        const remote = await remoteImage.prepare(incoming.url)
+        prepared = { blob: remote.blob, preview: remote.preview }
+        storage = { storageId: remote.storageId, mimeType: remote.mimeType, sizeBytes: remote.sizeBytes }
+        if (remote.fileName && remote.fileName !== "shopping-garment.jpg") updateGarment(id, { fileName: remote.fileName })
+      }
+      if (!prepared || garmentRef.current?.id !== id) return
+      // The new image is in hand; an earlier server-fetched blob no one saved is now discardable.
+      const prior = priorStorageRef.current
+      if (prior && prior !== storage?.storageId) void remoteImage.discard(prior).catch(() => {})
+      priorStorageRef.current = storage?.storageId ?? null
       imageRef.current = prepared.blob
-      updateGarment(id, { preview: prepared.preview, status: phaseRef.current === "ready" ? "fitting" : "waiting" })
+      updateGarment(id, {
+        preview: prepared.preview,
+        status: phaseRef.current === "ready" ? "fitting" : "waiting",
+        ...(storage ? { ...storage } : {})
+      })
       await apply(id, prepared.blob)
     } catch (error: any) {
       if (error?.message === "stopped") return
@@ -883,7 +944,7 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
       scanRef.current = { mode: "off", start: 0, revealRemote: false }
       setNotice(friendly(error))
     }
-  }, [apply, start, updateGarment])
+  }, [apply, start, updateGarment, remoteImage])
 
   /** Renaming the garment re-sends it, since the name is part of the Decart prompt. */
   const rename = useCallback((name: string) => {
@@ -917,7 +978,18 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
   // Garments dragged on the host page arrive from the content script.
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== window.parent || typeof event.data !== "object" || !event.data) return
+      // Browser-coupled: everything from window.parent carries the parent page's real origin,
+      // but the source check plus the origin-guard establish/accept pair below keeps the room
+      // fail-closed for any other window that manages to reach this listener.
+      if (!fromParent(event.source, parentRef.current) || typeof event.data !== "object" || !event.data) return
+      // Step 3B handshake: the content script posts our own page origin right after the iframe
+      // loads. It is only stored once event.origin agrees with the claim AND both are http(s).
+      if (event.data.type === "openwear:origin") {
+        originGuard.establish(typeof event.origin === "string" ? event.origin : "", event.data.origin)
+        return
+      }
+      // Fail closed: before the handshake completes, and after any mismatch, nothing else runs.
+      if (!originGuard.accept(typeof event.origin === "string" ? event.origin : "")) return
       if (event.data.type === "openwear:drag") setDragging(!!event.data.active)
       if (event.data.type === "openwear:garment") { void handleGarmentMessage(event.data); return }
       if (event.data.type === "openwear:room-ping") { postToParent({ type: "openwear:room-ready" }); return }
@@ -936,9 +1008,8 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
               return status?.state === "signed-in" && status.convexAuthenticated
             },
             openSignIn: signInOnFitcheck,
-            fetchImageDataUrl: (url: string) => background<string>("image", { url }),
-            normalizeImage,
             takeToken: (token: string) => consumeCapability(chrome.storage.session, token, "save"),
+            remoteImage: { registerRemote: (url, input) => remoteImage.registerRemote(url, input) },
             saver,
             adoptSavedItem: targetGarmentId === undefined ? undefined : (uploadId) => adoptSavedItem(targetGarmentId, uploadId),
             reply: (phase: SavePhase | "signed_out") => {
@@ -954,7 +1025,7 @@ export function Room({ authStatus, liveMirrorAction, refreshBilling, loadQuotaSt
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [handleGarmentMessage, saver, tryOn, adoptSavedItem])
+  }, [handleGarmentMessage, saver, tryOn, adoptSavedItem, originGuard, remoteImage])
 
   // ---------- Vision + scan effect loop ----------
   // One requestAnimationFrame loop: runs pose detection (~15 fps) while framing or scanning, feeds the

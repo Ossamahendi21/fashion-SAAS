@@ -181,6 +181,19 @@ function OpenWearShell() {
   }, [])
 
   /**
+   * Step 3, Requirement B handshake: tells the room WHICH origin is allowed to drive it. The room
+   * only stores this once the browser-reported event.origin agrees with the claim, so a hostile
+   * page cannot make itself the trusted origin, and it ignores every message until this arrives.
+   *
+   * Must run before the first queued garment is flushed: otherwise the room — which fails closed
+   * pre-handshake — would drop a perfectly good garment. So it is posted on iframe load (for an
+   * already-loaded room) and again inside the room-ready reply, before any pending flush.
+   */
+  const postOriginToRoom = useCallback(() => {
+    frameRef.current?.contentWindow?.postMessage({ type: "openwear:origin", origin: location.origin }, ROOM_ORIGIN)
+  }, [])
+
+  /**
    * Forwards one garment to the room with a one-time garment capability. The room consumes the
    * capability before acting, so a hostile page forging the message shape gets nothing: shape
    * alone never authorizes. Posts immediately when the room listens, else queues for the
@@ -195,12 +208,15 @@ function OpenWearShell() {
     }
     const message = { type: "openwear:garment", ...base, capability }
     if (openRef.current && roomReadyRef.current) {
+      // Re-post the origin every time: a room document that reloaded since the last handshake
+      // has forgotten it and would drop the garment.
+      postOriginToRoom()
       postToRoom(message)
       return
     }
     pendingTryOnRef.current = message
     setOpen(true)
-  }, [postToRoom])
+  }, [postToRoom, postOriginToRoom])
 
   /** Try on: behaves exactly like a dragged garment — no auth, camera, or mint involved. */
   const sendTryOn = useCallback((target: HoverTarget) => {
@@ -297,7 +313,8 @@ function OpenWearShell() {
     event.preventDefault()
     setDragActive(false)
     toRoom({ type: "openwear:drag", active: false })
-    const file = [...event.dataTransfer.files].find(item => item.type.startsWith("image/"))
+    // Raster only, mirroring lib/drop.ts: an SVG drop is refused at every entry point.
+    const file = [...event.dataTransfer.files].find(item => ["image/jpeg", "image/png", "image/webp"].includes(item.type))
     if (file) { void forwardGarment({ file, name: nameFromFile(file) }); return }
     // Prefer what dragstart recorded (sharpest image URL + product name), else read the drop data.
     const dragged = draggedRef.current
@@ -332,6 +349,10 @@ function OpenWearShell() {
       if (data.type === "openwear:room-ready") {
         roomReadyRef.current = true
         readyWaiterRef.current.resolve("ready", true)
+        // Origin FIRST: this very document just proved itself as the room's parent by answering
+        // with event.origin === ROOM_ORIGIN, so the room can arm. Flushing the queued garment
+        // before the handshake would hit the room's fail-closed gate and silently drop it.
+        postOriginToRoom()
         const pending = pendingTryOnRef.current
         if (pending) {
           pendingTryOnRef.current = null
@@ -344,7 +365,7 @@ function OpenWearShell() {
     }
     window.addEventListener("message", onMessage)
     return () => window.removeEventListener("message", onMessage)
-  }, [postToRoom])
+  }, [postToRoom, postOriginToRoom])
 
   useEffect(() => {
     if (!open) roomReadyRef.current = false
@@ -561,7 +582,16 @@ function OpenWearShell() {
         <button onClick={() => setOpen(false)} title="Close fitting room" aria-label="Close fitting room">−</button>
       </header>
       <div className="ow-body" style={{ height: rect.height - HEADER }}>
-        <iframe ref={frameRef} src={ROOM_URL} allow="camera; autoplay; clipboard-write" title="OpenWear fitting room" />
+        <iframe
+          ref={frameRef}
+          src={ROOM_URL}
+          allow="camera; autoplay; clipboard-write"
+          title="OpenWear fitting room"
+          // Arms the room's origin gate as soon as a room document exists. Without this the
+          // room would sit fail-closed until its first ready reply (or forever, if it never
+          // replies), dropping every message.
+          onLoad={postOriginToRoom}
+        />
         {dragActive && <div className="ow-drop-catcher" onDragEnter={e => e.preventDefault()} onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy" }} onDrop={onDrop} />}
       </div>
       <div className="ow-resize" onPointerDown={startResize} title="Drag to resize" />

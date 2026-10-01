@@ -396,3 +396,40 @@ Reusable Fitcheck mechanisms (no new auth primitive needed):
 **Grep sweeps (case-insensitive, excl. `node_modules`):** `decart|lucy|extension|openwear|openrouter|fashn|sam2|live mirror|live-mirror|livemirror` across `convex/`, `agent/`, `src/`, `extension/` → hits only in `extension/` (Decart/Lucy/openwear) and false-positive `extension` = file-extension in `src/`; `COMBINED_ARCHITECTURE_AUDIT` repo-wide → absent (confirmed new file).
 
 > Evidence convention: claims cite `path:line`. Residual unknowns are marked UNCONFIRMED in the working notes; only confirmed findings are stated above as fact.
+
+---
+
+## 15. Step 3 hardening (extension transport) &mdash; implementation record
+
+> **Date:** 2026-10-01 &middot; Implements roadmap Step 3 above. This is a post-audit record of the change made from the findings in sections 6/9/12 (see updated storage of S-6, S-9, S-10 below).
+
+**Requirement A &mdash; image fetch moved server-side, SSRF-guarded (was `S-9`):**
+
+- New `convex/lib/imageFetch.ts`: pure `fetchRemoteImage(href, deps)` with `ResolveHost` injection and optional `fetchImpl` for tests; `validateFetchUrl` rejects non-http(s), credentials, whitespace, localhost/`.local`/IP-literal fast gates; every URL (including `og:image` captures and each manual redirect hop) runs `validateFetchUrl` + DNS classification of **every** resolved A/AAAA record in `nodeResolveHost` (`convex/shoppingImages.ts`); capped 8 MB image / 2 MB HTML page, 5 redirects, 12 s timeout, raster-only `image/jpeg|image/png|image/webp` allowlist, no cookies/headers forwarded. `previewImageUrl` reads only `og:image`/`og:image:secure_url`/`twitter:image` (first share tag), and its captured value is re-validated before re-fetch.
+- New `convex/shoppingImages.ts` (actions only, `"use node"`): `fetchRemote` (auth via `ctx.auth.getUserIdentity` + internal `resolveFetchUser`) stores the fetched bytes into Convex storage and returns `{ storageId, mimeType, sizeBytes, downloadUrl }`; `discardFetch` deletes only blobs with **no** `uploads` row referencing them (`internal.shoppingImagesInternal.discardUnreferenced`, `uploads.by_storage` index in `convex/schema.ts`). Blobs never registered are GC'd by the caller's `discard()`/`priorStorageRef` lifecycle.
+- `extension/background.ts` no longer fetches images, no `case "image"`, no `fetch(`, no `data:image`; it mints capabilities via `handleIssueCapability` and injects the content script at install only. The browser supplies **only** the public URL.
+- `extension/lib/remote-image.ts` is the sole client boundary (`prepare` for try-on: server fetch &rarr; download bytes &rarr; `normalizeImage`; `registerBlob` reuses the SAME storage id for save; `registerRemote` for a headless page save fetches+registers in one op; `discard` relays the storage id). `extension/lib/wardrobe-save.ts:saveRemoteGarment` gates the URL with a cheap http(s) regex, then one-time token (`takeToken`), then `registerRemote`. Root tests: `tests/image-fetch.test.mjs` (25) cover validate/redirect/DNS/IP caps/caps/MIME/preview; extension tests `remote-image.test.mjs`, `image-links.test.mjs`, `page-save-adoption.test.mjs` cover the client boundary; E2E test 12 asserts the save path re-fetches through the boundary.
+
+**Requirement B &mdash; fail-closed parent-origin gate (was `S-6`):**
+
+- New `extension/lib/room-origin.ts`: `createOriginGuardCore()` fails closed; `establish(claimedOrigin, eventOrigin)` arms only when both are http(s) and equal; `accept`/`origin` stay locked until a verified handshake; outgoing `targetOrigin()` is `"*"` before arming (so `openwear:room-ready` can be answered) and the exact verified origin after. `fromParent` additionally requires the exact parent `window` object (not `MessageEvent.source`).
+- `extension/content.tsx` posts `openwear:origin` on iframe `onLoad`, on `openwear:room-ready` before flushing pending garments, and before immediate forwarding. Cross-origin hostile posts and replayed/forged capabilities still change nothing (E2E tests 8/9/11).
+- Tests: `extension/tests/room-origin.test.mjs` (9) cover fail-closed, forged/mismatched claims, non-http(s), re-arm on navigation, target-origin pinning, `fromParent`.
+
+**Requirement C &mdash; host permissions / WAR review (was `S-10`):**
+
+- **Decided: keep** `"permissions": ["cookies", "storage", "scripting"]` and `"host_permissions": ["https://*/*", "http://*/*"]`, and keep WAR `tabs/room.html &rarr; http(s)` in `extension/package.json` (Plasmo manifest key). Neither the manifest nor the WAR were changed. Rationale:
+  - `scripting` + broad host permissions: the content script must run on **arbitrary shop pages** (declarative `content_scripts` matches are host-permission-bounded in MV3), and the fit-room ribbon needs an in-page sidecar on any shop. There is no finite shop allowlist, so narrowing host permissions cannot be done safely yet.
+  - `cookies`: Clerk session sync on the app domain (the extension signs the user into the app to mint/refresh the Convex grant). The key never was and still is not stored in `chrome.storage`.
+  - The **blast radius** the audit was worried about has shrunk: the worker no longer does `fetch`, so broad host permissions no longer grant arbitrary network egress from a fetch-capable background context. Remaining surface: `chrome.tabs`-level injection and cookie visibility — low-value to an attacker, and the `content_security_policy` `extension_pages` stays `script-src 'self' 'wasm-unsafe-eval'; object-src 'self'`.
+  - **Residual (accepted):** a compromised content script on a page still reads that page, and `cookies` still exposes app-domain cookies to a compromised worker. Server-side fetch means neither lets an attacker pivot to arbitrary retailer hosts. Narrowing host permissions can be revisited per-shop when a shop allowlist exists; the audit's "permission-narrowing checklist per shop" (M3) is tracked, not done.
+
+**Requirement D/E &mdash; SVG policy everywhere (was `S-9` residual):**
+
+- `convex/lib/imageFetch.ts` allowlists raster MIME only (SVG never accepted from the fetch core); `convex/model/shoppingImports.ts`/`convex/model/uploads.ts` accept only `ACCEPTED_IMAGE_TYPES` and `assertStoredImage` cross-checks the stored blob.
+- `extension/lib/garment.ts` `ACCEPTED` is the exact three raster types and a **string** source is restricted to `data:image/(jpeg|png|webp);base64,`; `extension/lib/drop.ts` filters drops to the raster list; `extension/lib/wardrobe-save.ts` the client upload gate refuses any declared non-raster Blob before minting an upload URL; `background.ts` has no image path to regress.
+- Tests: `extension/tests/raster-only.test.mjs` (static pins across all five entry points) and the runtime SVG/`text/html` refusal case in `extension/tests/wardrobe-save.test.mjs`.
+
+**Verification recorded (2026-10-01):** root `node --test tests/*.test.mjs` 320 passed; extension `npm test` 350 passed (hang in the old `image-links` listener removed &mdash; it was rewritten for the server boundary); `tsc --noEmit -p convex/tsconfig.json` and extension `tsc --noEmit` clean; `npx convex codegen --typecheck disable` regenerated `convex/_generated`. E2E (`npm run test:e2e`) is the last green gate; the fixture server now sends `access-control-allow-origin: *` and E2E test 12's assertion was reworded to the server-fetch boundary.
+
+**Files added/changed for Step 3:** `convex/lib/imageFetch.ts`, `convex/shoppingImages.ts`, `convex/shoppingImagesInternal.ts`, `convex/schema.ts` (`uploads.by_storage`), `extension/lib/room-origin.ts`, `extension/lib/remote-image.ts`, `extension/lib/wardrobe-save.ts`, `extension/lib/garment.ts`, `extension/lib/drop.ts`, `extension/background.ts`, `extension/content.tsx`, `extension/tabs/room.tsx`, `extension/e2e/harness/backend-stub.ts`, `extension/e2e/harness/room-harness.tsx`, `extension/e2e/fixture/server.mjs`, `tests/image-fetch.test.mjs` (new), `extension/tests/{room-origin,remote-image,image-links,raster-only}.test.mjs` (new/rewritten), `extension/tests/{no-legacy-credentials,capability-service,page-save-adoption,wardrobe-save}.test.mjs` (updated).

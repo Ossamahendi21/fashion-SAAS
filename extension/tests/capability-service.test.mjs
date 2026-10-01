@@ -292,15 +292,23 @@ test("19: no credential or identity material is introduced", () => {
   assert.equal(/sendMessage\(\{[^}]*,[^}]*,/.test(client), false, "no extra request fields")
 })
 
-test("20: the image-download background path keeps its stricter gate", () => {
-  assert.ok(background.includes("const fromExtensionPage = sender.id === chrome.runtime.id"), "image path still requires an extension page")
-  assert.ok(background.includes('!!sender.url?.startsWith(chrome.runtime.getURL(""))'), "image path still requires our own origin")
-  assert.ok(background.includes('case "image": return getImage(message.url || "")'), "image case is unchanged")
-  assert.ok(background.includes("Only OpenWear's own pages (fitting room) may fetch images"), "the comment still states the rule")
-  // Capability issuance is a separate, explicitly named case, not a widening of that one.
-  const start = background.indexOf("handleIssueCapability(message")
-  const issuance = background.slice(start, background.indexOf("const run = async"))
-  assert.ok(start > 0, "the worker delegates issuance to the gated service")
-  assert.equal(issuance.includes("getImage"), false, "issuance never reaches the image fetch path")
-  assert.equal(issuance.includes("chrome.storage.local"), false, "issuance does not touch persistent storage")
+test("20: the worker issues capabilities only, and has no fetch path at all (Step 3)", () => {
+  // Step 3 removed the image message entirely: retail images are fetched and stored by the
+  // authenticated Convex action shoppingImages:fetchRemote. What remains in the worker is
+  // capability minting, gated so only this extension's own top frame can ask.
+  assert.ok(/\)\?\.type !== ISSUE_CAPABILITY_MESSAGE\) return false/.test(background), "only capability issuance is handled")
+  assert.ok(background.includes("handleIssueCapability(message, sender"), "issuance is delegated to the gated service")
+  assert.ok(!background.includes('case "image"'), "the image handler is gone")
+  assert.ok(!background.includes("getImage"), "no image fetch helper remains")
+  assert.ok(!background.includes("fromExtensionPage"), "the old image-path sender gate is gone with it")
+  // No image pipeline survives anywhere in the worker, in any of its former shapes.
+  for (const gone of ["imageDataUrl", "previewImageUrl", "fetchPublic", "readBytes", "IMAGE_TYPES", "MAX_IMAGE_BYTES", "MAX_PAGE_BYTES", "imageUrl("]) {
+    assert.ok(!background.includes(gone), `the worker must not keep ${gone}`)
+  }
+  // A service worker with no fetch path must not even be able to reach the network layer.
+  assert.equal(background.includes("fetch("), false, "the worker performs no fetch")
+  assert.equal(background.includes("XMLHttpRequest"), false, "the worker opens no XHR")
+  // Issuance itself stays narrow: no storage, no secrets, no provider call.
+  assert.equal(background.includes("chrome.storage.local"), false, "issuance does not touch persistent storage")
+  assert.equal(background.includes("api.decart.ai"), false, "issuance never calls the provider")
 })

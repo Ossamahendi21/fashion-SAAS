@@ -1,7 +1,7 @@
 // Tiny zero-dependency fixture server for the shopping-extension E2E.
 // Serves e2e/fixture over plain http on 127.0.0.1 with an ephemeral port and keeps a
 // request log so tests can prove which bytes the extension really fetched (notably the
-// background worker's image download). No production code depends on this module.
+// Step 3 server-fetch boundary's byte retrieval). No production code depends on this module.
 import { createServer } from "node:http";
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { join, dirname, extname, normalize } from "node:path";
@@ -24,17 +24,25 @@ export function startFixtureServer() {
     const stamp = Date.now();
     requests.push({ method: req.method, path: url.pathname, at: stamp });
     if (url.pathname === "/__e2e/requests") {
-      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+        "access-control-allow-origin": "*",
+      });
       res.end(JSON.stringify(requests));
       return;
     }
     const file = normalize(join(fixtureDir, url.pathname === "/" ? "shop.html" : url.pathname.slice(1)));
     if (!file.startsWith(fixtureDir) || !existsSync(file) || !statSync(file).isFile()) {
-      res.writeHead(404, { "content-type": "text/plain" });
+      res.writeHead(404, { "content-type": "text/plain", "access-control-allow-origin": "*" });
       res.end("not found");
       return;
     }
-    res.writeHead(200, { "content-type": MIME[extname(file)] || "application/octet-stream", "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": MIME[extname(file)] || "application/octet-stream",
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+    });
     res.end(readFileSync(file));
   });
   return new Promise((resolve) => {

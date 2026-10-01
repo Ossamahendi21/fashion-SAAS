@@ -1,56 +1,69 @@
+// Step 3, boundaries at the extension edge for retail-image links.
+//
+// The old worker answered `{type:"image", url}` with a browser-side fetch. That path is gone:
+// retail bytes are now fetched, validated and stored by the authenticated Convex action
+// `shoppingImages:fetchRemote` (pure logic covered unit-level in ../tests/image-fetch.test.mjs).
+// These tests pin (1) the worker has no image handler to answer at all, (2) no extension module
+// still issues an image-fetch message, and (3) the image URL never crosses to the server
+// boundary until the one-time page-token handoff has succeeded.
 import test from "node:test"
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { build } from "esbuild"
 
-let listener
-globalThis.chrome = {
-  storage: { local: { get: async () => ({}) } },
-  runtime: { id: "ext", getURL: path => `chrome-extension://ext/${path}`, onMessage: { addListener: callback => { listener = callback } }, onInstalled: { addListener() {} }, onMessageExternal: { addListener() {} } }
+const root = fileURLToPath(new URL("../", import.meta.url))
+const read = (relative) => readFileSync(`${root}${relative}`, "utf8")
+
+async function bundleModule(relative) {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL(relative, import.meta.url))], bundle: true, format: "esm", write: false })
+  return import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`)
 }
 
-const bundled = await build({ entryPoints: [fileURLToPath(new URL("../background.ts", import.meta.url))], bundle: true, format: "esm", write: false })
-await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString("base64")}`)
-
-function requestImage(url) {
-  return new Promise(resolve => {
-    listener({ type: "image", url }, { id: "ext", url: "chrome-extension://ext/tabs/room.html" }, resolve)
-  })
-}
-
-test("a large Pinterest-style pin page resolves its public preview image", async () => {
-  const page = "https://www.pinterest.com/pin/123/"
-  const image = "https://i.pinimg.com/736x/test.jpg?width=736&quality=90"
-  const html = `<html><head><meta content="${image.replaceAll("&", "&amp;")}" property="og:image"/><\/head><body>${"x".repeat(1_200_000)}</body></html>`
-  const calls = []
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async (url, options) => {
-    calls.push({ url, options })
-    if (url === page) return new Response(html, { headers: { "content-type": "text/html; charset=utf-8", "content-length": String(html.length) } })
-    if (url === image) return new Response(new Uint8Array([255, 216, 255]), { headers: { "content-type": "image/jpeg" } })
-    throw new Error(`Unexpected URL: ${url}`)
+test("the worker no longer answers image requests of any kind", async () => {
+  let handledAnything = false
+  globalThis.chrome = {
+    storage: { session: { get: async () => ({}) }, local: { get: async () => ({}) } },
+    runtime: {
+      id: "ext",
+      getURL: path => `chrome-extension://ext/${path}`,
+      onMessage: { addListener: () => { handledAnything = true } },
+      onMessageExternal: { addListener() {} },
+      onInstalled: { addListener() {} }
+    },
+    scripting: { executeScript() {} }
   }
-  try {
-    const reply = await requestImage(page)
-    assert.equal(reply.ok, true)
-    assert.equal(reply.data, "data:image/jpeg;base64,/9j/")
-    assert.deepEqual(calls.map(call => call.url), [page, image])
-    assert.ok(calls.every(call => call.options.credentials === "omit" && call.options.redirect === "follow"))
-  } finally { globalThis.fetch = originalFetch }
+  await bundleModule("../background.ts")
+  assert.ok(handledAnything, "the worker still has a message listener")
+  // And that listener runs a capability gate, not a fetch: prove it from source, not bundles.
+  const background = read("background.ts")
+  assert.equal(background.includes('case "image"'), false, "there is no image case to reach")
+  assert.equal(background.includes("requestImage"), false)
+  assert.equal(background.includes("IMAGE_TYPES"), false)
+  assert.equal(background.includes("getUrlOrPreview"), false)
+  assert.ok(background.includes("ISSUE_CAPABILITY_MESSAGE"), "the only handled message is capability issuance")
 })
 
-test("a page without an image returns a useful link-specific error", async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response("<html><head></head></html>", { headers: { "content-type": "text/html" } })
-  try {
-    const reply = await requestImage("https://example.com/product")
-    assert.equal(reply.ok, false)
-    assert.match(reply.error, /no public product image/i)
-  } finally { globalThis.fetch = originalFetch }
+test("no extension module asks the worker to fetch an image anymore", () => {
+  for (const file of ["content.tsx", "tabs/room.tsx", "popup.tsx", "options.tsx", "lib/capability-client.ts", "lib/hover-overlay.ts", "lib/vision.ts"]) {
+    const source = read(file)
+    assert.equal(source.includes('type: "image"'), false, `${file} must not issue image-fetch messages`)
+  }
 })
 
-test("an optional live public product-page link resolves to an image", { skip: !process.env.OPENWEAR_LIVE_PIN_URL }, async () => {
-  const reply = await requestImage(process.env.OPENWEAR_LIVE_PIN_URL)
-  assert.equal(reply.ok, true, reply.error)
-  assert.match(reply.data, /^data:image\/(jpeg|png|webp);base64,/)
+test("the page-token handoff gates the image URL at the server boundary", async () => {
+  const { saveRemoteGarment } = await bundleModule("../lib/wardrobe-save.ts")
+  const calls = { registerRemote: 0, takeToken: 0 }
+  await saveRemoteGarment({
+    isSignedIn: () => true,
+    openSignIn: () => {},
+    remoteImage: {
+      registerRemote: async () => { calls.registerRemote++; return { uploadId: "u", jobId: "j" } }
+    },
+    takeToken: async () => { calls.takeToken++; return false },
+    saver: { watch: async () => "ready" },
+    reply: () => {}
+  }, { imageUrl: "https://cdn.shop.example/product.jpg", clientImportId: "client-a-b-c", token: "forged" })
+  assert.equal(calls.registerRemote, 0, "a forged token never crosses the boundary")
+  assert.equal(calls.takeToken, 1)
 })

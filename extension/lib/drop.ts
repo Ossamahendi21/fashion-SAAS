@@ -10,7 +10,10 @@ export function nameFromFile(file: File) {
 }
 
 export function parseDrop(transfer: DataTransfer): Incoming | null {
-  const file = [...transfer.files].find(item => item.type.startsWith("image/"))
+  // Raster only: an SVG dropped onto the page would reach the room as markup that executes in
+  // whatever renders it, so it is not accepted here (normalizeImage and the server allowlist
+  // refuse it too — every entry point declines SVG).
+  const file = [...transfer.files].find(item => ["image/jpeg", "image/png", "image/webp"].includes(item.type))
   if (file) return { file, name: nameFromFile(file) }
   // Dragged web images carry HTML (<img src alt>); dragged links carry a URL list or plain text.
   const html = transfer.getData("text/html")

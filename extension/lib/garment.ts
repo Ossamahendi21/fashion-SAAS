@@ -19,11 +19,20 @@ export function buildPrompt(name: string) {
   return `Substitute the outfit with the complete outfit shown in the reference image${named}.`
 }
 
-const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "image/svg+xml"])
+// Raster formats only: SVG is markup that executes in any renderer that takes a blob URL
+// (Decart, our own preview <img> on some builds), so it is refused at every entry point —
+// drags, file pickers, clipboard, and the server fetch allowlist.
+const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp"])
 
 /** Letterboxes any garment image onto a clean white 768px square JPEG (Decart recommends ≥512px, plain background). */
 export async function normalizeImage(source: Blob | string): Promise<{ blob: Blob; preview: string }> {
-  if (typeof source !== "string" && (!ACCEPTED.has(source.type) || source.size > 8 * 1024 * 1024)) throw Error("Use a JPG, PNG or WebP image under 8 MB")
+  if (typeof source === "string") {
+    // A string source is only ever a raster data URL: blob: and http(s) URLs and any SVG or
+    // markup payload are refused here so no renderer (Decart, our own preview) can execute one.
+    if (!/^data:image\/(jpeg|png|webp);base64,/.test(source)) throw Error("Use a JPG, PNG or WebP image under 8 MB")
+  } else if (!ACCEPTED.has(source.type) || source.size > 8 * 1024 * 1024) {
+    throw Error("Use a JPG, PNG or WebP image under 8 MB")
+  }
   const objectUrl = typeof source === "string" ? source : URL.createObjectURL(source)
   try {
     const image = new Image()

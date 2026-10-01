@@ -44,6 +44,17 @@ export const shoppingImportStatus = makeFunctionReference<"query", { uploadId: s
   "shoppingImports:status"
 )
 
+/** Step 3 server boundary: fetch + store a public retailer image server-side (SSRF-gated). */
+export const fetchRemoteServerImage = makeFunctionReference<
+  "action",
+  { url: string },
+  { storageId: string; mimeType: string; sizeBytes: number; downloadUrl: string }
+>("shoppingImages:fetchRemote")
+/** Authenticated discard of an unregistered server-fetched blob (safe no-op when referenced). */
+export const discardServerImage = makeFunctionReference<"action", { storageId: string }, null>(
+  "shoppingImages:discardFetch"
+)
+
 // ---------- Style this item (Step 3C) ----------
 
 /** Authenticated styling request. Takes only the saved item id; everything else is server-side. */
@@ -303,7 +314,13 @@ export function createWardrobeSaver(deps: WardrobeSaveDeps) {
       if (!(input.blob instanceof Blob) || input.blob.size <= 0) {
         throw new Error("There is no garment image to save yet.")
       }
-      const mimeType = input.blob.type.startsWith("image/") ? input.blob.type : "image/jpeg"
+      // Raster only, never a blanket image/*: SVG is markup that executes in any renderer that
+      // takes it, so a Blob whose declared type is SVG (or any other non-raster image type) is
+      // refused here. A blank type is treated as a re-encoded JPEG (canvas output); the canvas
+      // normalization upstream already went raster-only.
+      const RASTER = ["image/jpeg", "image/png", "image/webp"]
+      if (input.blob.type && !RASTER.includes(input.blob.type)) throw new Error("Use a JPG, PNG or WebP image.")
+      const mimeType = input.blob.type || "image/jpeg"
       const url = await deps.generateUploadUrl()
       const storageId = await deps.postBlob(url, input.blob, mimeType)
       const { uploadId, jobId } = await deps.registerImport({
@@ -579,10 +596,11 @@ export function parseGarmentMessage(data: unknown): GarmentCommand | null {
 export type RemoteSaveRoomDeps = {
   isSignedIn: () => boolean
   openSignIn: () => void
-  /** Existing safe background image fetch (no shop cookies). */
-  fetchImageDataUrl: (url: string) => Promise<string>
-  normalizeImage: (source: Blob | string) => Promise<{ blob: Blob }>
   takeToken: (token: string) => Promise<boolean>
+  /** Step 3 server boundary: fetch + register a remote image on the server-stored blob. */
+  remoteImage: {
+    registerRemote: (url: string, input: RemoteImageRegisterInput) => Promise<{ uploadId: string; jobId: string }>
+  }
   saver: WardrobeSaver
   /** Terminal phase (or signed_out) back to the page. Carries no secrets. */
   reply: (phase: SavePhase | "signed_out") => void
@@ -597,9 +615,10 @@ export type RemoteSaveRoomDeps = {
 
 /**
  * Room-side headless save: validates the untrusted page message, consumes the one-time token
- * (silently ignoring forged, replayed, or malformed requests), then saves through the same
- * saver the in-room button uses — no camera, no Live Mirror, no quota read. Malformed input
- * and token failures never reply: there is nothing for an attacker to learn.
+ * (silently ignoring forged, replayed, or malformed requests), then registers the image
+ * through the Step 3 server boundary (server fetch + storage + shoppingImports:register) —
+ * no camera, no Live Mirror, no quota read, no client upload. Malformed input and token
+ * failures never reply: there is nothing for an attacker to learn.
  */
 export async function saveRemoteGarment(deps: RemoteSaveRoomDeps, input: RemoteSaveInput): Promise<void> {
   const { imageUrl, clientImportId, token } = input ?? {}
@@ -614,16 +633,10 @@ export async function saveRemoteGarment(deps: RemoteSaveRoomDeps, input: RemoteS
     return
   }
   try {
-    const dataUrl = await deps.fetchImageDataUrl(imageUrl)
-    const { blob } = await deps.normalizeImage(dataUrl)
-    const saveInput: { blob: Blob; fileName: string; productTitle?: string; sourcePageUrl?: string; clientImportId: string } = {
-      blob,
-      fileName: fileNameFromUrl(imageUrl),
-      clientImportId
-    }
-    if (typeof input.productTitle === "string" && input.productTitle) saveInput.productTitle = input.productTitle
-    if (typeof input.sourcePageUrl === "string" && input.sourcePageUrl) saveInput.sourcePageUrl = input.sourcePageUrl
-    const { uploadId } = await deps.saver.save(saveInput)
+    const registerInput: RemoteImageRegisterInput = { clientImportId }
+    if (typeof input.productTitle === "string" && input.productTitle) registerInput.productTitle = input.productTitle
+    if (typeof input.sourcePageUrl === "string" && input.sourcePageUrl) registerInput.sourcePageUrl = input.sourcePageUrl
+    const { uploadId } = await deps.remoteImage.registerRemote(imageUrl, registerInput)
     const terminal = await deps.saver.watch(uploadId, {})
     // A page-pill save and the in-room button must land on the SAME saved-item state, so the
     // room's canonical adoption runs here too. It only reads the completed save; it never
@@ -633,4 +646,11 @@ export async function saveRemoteGarment(deps: RemoteSaveRoomDeps, input: RemoteS
   } catch {
     deps.reply("failed")
   }
+}
+
+/** Register input for the Step 3 server boundary (see remote-image.ts). */
+export type RemoteImageRegisterInput = {
+  clientImportId: string
+  productTitle?: string
+  sourcePageUrl?: string
 }

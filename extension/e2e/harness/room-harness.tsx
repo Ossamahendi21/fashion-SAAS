@@ -13,6 +13,8 @@ import { useEffect, useMemo, useRef } from "react"
 import { createRoot } from "react-dom/client"
 import { Room } from "../../tabs/room"
 import { issueCapability, type WardrobeSaveDeps } from "../../lib/wardrobe-save"
+import { normalizeImage } from "../../lib/garment"
+import { createRemoteImageClient, type RemoteImageClient } from "../../lib/remote-image"
 import { createE2eBackend, type E2eBackend } from "./backend-stub"
 
 declare global {
@@ -62,6 +64,25 @@ function HarnessRoom() {
       registerImport: (input) => backend.registerImport(input),
       queryStatus: (uploadId: string) => backend.queryStatus(uploadId),
     }),
+    [backend]
+  )
+
+  // Step 3 remote-image client against the stubbed server boundary. The fixture server is the
+  // only fetchable host (extension host permissions are restricted in the test build), which
+  // keeps the "server fetch" real enough to exercise the URL garment path end to end.
+  const remoteImage = useMemo<RemoteImageClient>(
+    () =>
+      createRemoteImageClient({
+        fetchRemote: (url) => backend.fetchRemote(url),
+        readBlob: (downloadUrl) => {
+          const storageId = downloadUrl.startsWith("e2e-storage:") ? downloadUrl.slice("e2e-storage:".length) : ""
+          const stored = storageId ? backend.remote.stored.get(storageId) : undefined
+          return stored ? Promise.resolve(stored) : fetch(downloadUrl).then((res) => res.blob())
+        },
+        normalizeImage,
+        registerImport: (input) => backend.registerImport(input),
+        discardRemote: (storageId) => backend.discardFetch(storageId),
+      }),
     [backend]
   )
 
@@ -118,6 +139,7 @@ function HarnessRoom() {
         void args
         return backend.requestAdvice()
       }}
+      remoteImage={remoteImage}
     />
   )
 }

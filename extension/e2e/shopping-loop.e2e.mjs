@@ -1,7 +1,7 @@
 ﻿// Shopping-extension browser E2E: the complete shopping loop in a REAL Chrome
 // extension runtime. Zero paid providers: every Convex/Clerk/Decart/OpenAI boundary is
-// stubbed in the harness room; the background image fetch hits only the local fixture
-// server. Run via `npm run test:e2e` (orchestrator provides E2E_* env), never directly.
+// stubbed in the harness room; the Step 3 server-fetch boundary hits only the local
+// fixture server. Run via `npm run test:e2e` (orchestrator provides E2E_* env), never directly.
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -395,7 +395,7 @@ test("12: contextual Save walks Saving, Processing, Saved", async () => {
   const calls = await e2eGet("calls");
   assert.equal(calls.register, 1, "one registration");
   assert.ok(calls.status >= 2, "status polled to a terminal state");
-  assert.equal(await fetchCount("/images/product-jacket.png"), fetchesBefore + 1, "room fetched the image through the background worker");
+  assert.equal(await fetchCount("/images/product-jacket.png"), fetchesBefore + 1, "the save reached the page URL through the server fetch boundary");
 });
 
 test("13: Style, Advice and Own actions appear after save", async () => {

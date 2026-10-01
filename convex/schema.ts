@@ -91,7 +91,9 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_user_status", ["userId", "status"])
     .index("by_batch", ["batchId"])
-    .index("by_user_clientImportId", ["userId", "clientImportId"]),
+    .index("by_user_clientImportId", ["userId", "clientImportId"])
+    /** Lets discardFetch verify no import references a server-fetched blob before deleting it. */
+    .index("by_storage", ["storageId"]),
 
   items: defineTable({
     userId: v.id("users"),

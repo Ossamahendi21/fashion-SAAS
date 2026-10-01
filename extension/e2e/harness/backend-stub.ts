@@ -34,7 +34,14 @@ export type E2eBackend = {
     liveMirror: number
     quota: number
   }
-  registered: Array<{ uploadId: string; fileName: string }>
+  registered: Array<{ uploadId: string; fileName: string; storageId: string }>
+  /** Step 3: server-fetched image lifecycle, mirroring convex shoppingImages:fetchRemote / :discardFetch. */
+  remote: {
+    fetchRemote: number
+    discardFetch: number
+    /** storageId -> bytes fetched from the fixture server, so try-on reads real image bytes. */
+    stored: Map<string, Blob>
+  }
   events: E2eEvent[]
   /** Base URL of the fixture server; item thumbnail URLs are built from it at call time. */
   fixtureBase: string
@@ -49,9 +56,13 @@ export type E2eBackend = {
   setStyleError: (message: string | null) => void
   adviceError: string | null
   setAdviceError: (message: string | null) => void
+  /** Step 3 server boundary: fetch + store the bytes, returning a download URL (no Convex here). */
+  fetchRemote: (url: string) => Promise<{ storageId: string; mimeType: string; sizeBytes: number; downloadUrl: string }>
+  /** Step 3 server boundary: reference-safe delete of an unregistered blob. */
+  discardFetch: (storageId: string) => Promise<void>
   generateUploadUrl: () => Promise<string>
   postBlob: () => Promise<string>
-  registerImport: (input: { fileName: string }) => Promise<{ uploadId: string; jobId: string; deduped: boolean }>
+  registerImport: (input: { fileName: string; storageId?: string }) => Promise<{ uploadId: string; jobId: string; deduped: boolean }>
   queryStatus: (uploadId: string) => Promise<ShoppingImportStatus>
   requestStyling: () => Promise<{ suggestions: StyledSuggestion[] }>
   requestAdvice: () => Promise<ShoppingAdvice>
@@ -65,6 +76,7 @@ export function createE2eBackend(): E2eBackend {
   const backend: E2eBackend = {
     calls: { uploadUrl: 0, blobStore: 0, register: 0, status: 0, style: 0, advice: 0, owned: 0, liveMirror: 0, quota: 0 },
     registered: [],
+    remote: { fetchRemote: 0, discardFetch: 0, stored: new Map<string, Blob>() },
     events: [],
     fixtureBase: "",
     saveSequence: ["processing", "ready"],
@@ -87,6 +99,30 @@ export function createE2eBackend(): E2eBackend {
     setAdviceError(message: string | null) {
       backend.adviceError = message
     },
+    async fetchRemote(url: string) {
+      backend.remote.fetchRemote += 1
+      // Stands in for convex/lib/imageFetch.ts: the bytes come from the local fixture server
+      // (the only host this test extension is allowed to fetch), raster types only, size-capped.
+      // This keeps the E2E real for URL garments without giving the extension arbitrary egress.
+      const response = await fetch(url)
+      if (!response.ok) throw new Error(`Image or page returned ${response.status}`)
+      const mimeType = (response.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()
+      if (!["image/jpeg", "image/png", "image/webp"].includes(mimeType)) throw new Error("Use a JPG, PNG or WebP image")
+      const blob = await response.blob()
+      const storageId = `storage-e2e-remote-${backend.remote.fetchRemote}`
+      backend.remote.stored.set(storageId, blob)
+      log("remote-fetched", storageId)
+      // String key so the harness can serve the bytes in-memory (a real Convex storage URL,
+      // which the production client downloads with fetch, never has this prefix).
+      return { storageId, mimeType, sizeBytes: blob.size, downloadUrl: `e2e-storage:${storageId}` }
+    },
+    async discardFetch(storageId: string) {
+      backend.remote.discardFetch += 1
+      // Same reference-safe contract as the server: a blob a save already registered stays.
+      if (backend.registered.some((row) => row.storageId === storageId)) return
+      backend.remote.stored.delete(storageId)
+      log("remote-discarded", storageId)
+    },
     async generateUploadUrl() {
       backend.calls.uploadUrl += 1
       log("upload-url")
@@ -97,10 +133,10 @@ export function createE2eBackend(): E2eBackend {
       log("blob-stored")
       return "storage-e2e-1"
     },
-    async registerImport(input: { fileName: string }) {
+    async registerImport(input: { fileName: string; storageId?: string }) {
       backend.calls.register += 1
       const uploadId = `uploads-e2e-${backend.calls.register}`
-      backend.registered.push({ uploadId, fileName: input.fileName })
+      backend.registered.push({ uploadId, fileName: input.fileName, storageId: input.storageId ?? "" })
       log("save-started", input.fileName)
       return { uploadId, jobId: `jobs-e2e-${backend.calls.register}`, deduped: false }
     },
@@ -190,6 +226,7 @@ export function createE2eBackend(): E2eBackend {
     reset() {
       backend.calls = { uploadUrl: 0, blobStore: 0, register: 0, status: 0, style: 0, advice: 0, owned: 0, liveMirror: 0, quota: 0 }
       backend.registered = []
+      backend.remote = { fetchRemote: 0, discardFetch: 0, stored: new Map<string, Blob>() }
       backend.events = []
       backend.saveSequence = ["processing", "ready"]
       backend.delays = { statusMs: 0, styleMs: 0, adviceMs: 0 }

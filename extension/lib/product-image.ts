@@ -52,6 +52,9 @@ export function isEligibleProductImage(signals: ProductImageSignals): boolean {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return false
   const filename = url.pathname.split("/").pop() ?? ""
+  // SVG never becomes a hover/try-on candidate: it is active markup, not a raster photo. This is
+  // a filename sniff, so it is only an early filter — the server MIME allowlist and the client's
+  // normalizeImage both refuse SVG on content regardless of what the URL claims to be.
   if (/\.svg(\?|$)/i.test(filename)) return false
   if (FILENAME_DENY.test(filename) || FILENAME_DENY.test(url.pathname)) return false
   return true

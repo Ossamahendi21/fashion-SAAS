@@ -23,14 +23,21 @@ const root = fileURLToPath(new URL("../", import.meta.url))
 const read = (relative) => readFileSync(`${root}${relative}`, "utf8")
 const room = read("tabs/room.tsx")
 
-/** A saver that records every call so we can prove no second save ever happens. */
+/** Records every registration and status watch so we can prove no second save ever happens. */
 function fakeSaver({ terminal = "ready" } = {}) {
-  const calls = { save: 0, watch: 0, adopted: [] }
+  const calls = { register: 0, watch: 0, registeredIds: [], watchedIds: [] }
   return {
     calls,
+    remoteImage: {
+      registerRemote: async (_url, registerInput) => {
+        calls.register++
+        calls.registeredIds.push(registerInput.clientImportId)
+        return { uploadId: "uploads-1", jobId: "jobs-1" }
+      }
+    },
     saver: {
-      save: async () => { calls.save++; return { uploadId: "uploads-1", jobId: "jobs-1" } },
-      watch: async (uploadId) => { calls.watch++; calls.watched = uploadId; return terminal }
+      save: async () => { throw new Error("the room must never upload; the server fetched the bytes") },
+      watch: async (uploadId) => { calls.watch++; calls.watchedIds.push(uploadId); return terminal }
     }
   }
 }
@@ -38,8 +45,11 @@ function fakeSaver({ terminal = "ready" } = {}) {
 const deps = (overrides = {}) => ({
   isSignedIn: () => true,
   openSignIn: () => {},
-  fetchImageDataUrl: async () => "data:image/jpeg;base64,/9j/",
-  normalizeImage: async () => ({ blob: new Blob(["x"], { type: "image/jpeg" }) }),
+  // Step 3: the image is fetched, stored and registered server-side. The room never downloads
+  // retail bytes or builds a data URL, so there is no fetchImageDataUrl/normalizeImage dep left.
+  remoteImage: {
+    registerRemote: async () => ({ uploadId: "uploads-1", jobId: "jobs-1" })
+  },
   takeToken: async () => true,
   reply: () => {},
   ...overrides
@@ -55,11 +65,11 @@ const input = (overrides = {}) => ({
 // ---------- 1, 2, 15: a ready contextual save adopts and still replies Saved ----------
 
 test("1/2/15: a ready contextual save adopts the saved item and still replies ready", async () => {
-  const { saver, calls } = fakeSaver({ terminal: "ready" })
+  const { saver, remoteImage } = fakeSaver({ terminal: "ready" })
   const replies = []
   const adopted = []
   await saveRemoteGarment(
-    deps({ saver, reply: (phase) => replies.push(phase), adoptSavedItem: async (uploadId) => { adopted.push(uploadId) } }),
+    deps({ saver, remoteImage, reply: (phase) => replies.push(phase), adoptSavedItem: async (uploadId) => { adopted.push(uploadId) } }),
     input()
   )
   assert.deepEqual(adopted, ["uploads-1"], "the room is told to adopt the completed save, with its uploadId")
@@ -68,11 +78,11 @@ test("1/2/15: a ready contextual save adopts the saved item and still replies re
 
 // ---------- 6, 7: adoption is state synchronisation only ----------
 
-test("6: adopting a contextual save never starts a second save or any provider call", async () => {
-  const { saver, calls } = fakeSaver({ terminal: "ready" })
+test("6: adopting a contextual save never starts a second registration or any provider call", async () => {
+  const { saver, remoteImage, calls } = fakeSaver({ terminal: "ready" })
   const adopted = []
-  await saveRemoteGarment(deps({ saver, adoptSavedItem: async (uploadId) => { adopted.push(uploadId) } }), input())
-  assert.equal(calls.save, 1, "exactly one save")
+  await saveRemoteGarment(deps({ saver, remoteImage, adoptSavedItem: async (uploadId) => { adopted.push(uploadId) } }), input())
+  assert.equal(calls.register, 1, "exactly one server-side registration")
   assert.equal(calls.watch, 1, "exactly one watch cycle")
   assert.equal(adopted.length, 1, "adoption is called once, after the save completed")
   // Adoption only receives an uploadId, so it structurally cannot register or upload again.
@@ -81,16 +91,18 @@ test("6: adopting a contextual save never starts a second save or any provider c
 
 test("6b: adoption runs after the watch completes, never before the reply", async () => {
   const order = []
-  const { saver } = fakeSaver({ terminal: "ready" })
   await saveRemoteGarment(
     deps({
-      saver: { save: async () => { order.push("save"); return { uploadId: "u", jobId: "j" } }, watch: async () => { order.push("watch"); return "ready" } },
+      saver: { watch: async () => { order.push("watch"); return "ready" } },
+      remoteImage: {
+        registerRemote: async () => { order.push("register"); return { uploadId: "u", jobId: "j" } }
+      },
       adoptSavedItem: async () => { order.push("adopt") },
       reply: () => { order.push("reply") }
     }),
     input()
   )
-  assert.deepEqual(order, ["save", "watch", "adopt", "reply"], "one save, then adoption, then the page reply")
+  assert.deepEqual(order, ["register", "watch", "adopt", "reply"], "one registration, then adoption, then the page reply")
 })
 
 // ---------- 8-12: only a real ready item enables the downstream actions ----------
@@ -99,8 +111,8 @@ test("8/9/10/11/12: a non-ready terminal phase never adopts the saved-item state
   for (const terminal of ["processing", "needs_credits", "no_item", "failed"]) {
     const adopted = []
     const replies = []
-    const { saver } = fakeSaver({ terminal })
-    await saveRemoteGarment(deps({ saver, reply: (phase) => replies.push(phase), adoptSavedItem: async (u) => { adopted.push(u) } }), input())
+    const { saver, remoteImage } = fakeSaver({ terminal })
+    await saveRemoteGarment(deps({ saver, remoteImage, reply: (phase) => replies.push(phase), adoptSavedItem: async (u) => { adopted.push(u) } }), input())
     assert.deepEqual(adopted, [], `${terminal} does not expose Style / Advice / I bought this`)
     assert.deepEqual(replies, [terminal], `${terminal} is still reported to the page`)
   }
@@ -110,10 +122,11 @@ test("12b: signed_out adopts nothing", async () => {
   let signInOpened = 0
   const adopted = []
   const replies = []
-  const { saver, calls } = fakeSaver()
+  const { saver, remoteImage, calls } = fakeSaver()
   await saveRemoteGarment(
     deps({
       saver,
+      remoteImage,
       isSignedIn: () => false,
       openSignIn: () => { signInOpened++ },
       reply: (phase) => replies.push(phase),
@@ -122,42 +135,47 @@ test("12b: signed_out adopts nothing", async () => {
     input()
   )
   assert.equal(signInOpened, 1)
-  assert.equal(calls.save, 0, "a signed-out room never saves")
+  assert.equal(calls.register, 0, "a signed-out room never registers")
+  assert.equal(calls.watch, 0, "a signed-out room never watches")
   assert.deepEqual(adopted, [], "signed_out adopts nothing")
   assert.deepEqual(replies, ["signed_out"])
 })
 
 test("12c: a forged token adopts nothing", async () => {
   const adopted = []
-  const { saver, calls } = fakeSaver()
-  await saveRemoteGarment(deps({ saver, takeToken: async () => false, adoptSavedItem: async (u) => { adopted.push(u) } }), input())
-  assert.equal(calls.save, 0)
+  const { saver, remoteImage, calls } = fakeSaver()
+  await saveRemoteGarment(deps({ saver, remoteImage, takeToken: async () => false, adoptSavedItem: async (u) => { adopted.push(u) } }), input())
+  assert.equal(calls.register, 0, "a forged token never reaches the server boundary")
+  assert.equal(calls.watch, 0)
   assert.deepEqual(adopted, [])
 })
 
 // ---------- 16: adoption stays single-flight ----------
 
-test("16: a double-clicked contextual save still runs one save and one adoption", async () => {
-  // Uses the REAL saver, so this exercises the actual single-flight-per-idempotency-key
-  // guarantee rather than a test double's optimism.
-  const { createWardrobeSaver } = await bundleModule("../lib/wardrobe-save.ts")
-  const counts = { uploadUrl: 0, postBlob: 0, register: 0, status: 0 }
-  const real = createWardrobeSaver({
-    generateUploadUrl: async () => { counts.uploadUrl++; return "https://upload.test/u" },
-    postBlob: async () => { counts.postBlob++; return "storage-1" },
-    registerImport: async () => { counts.register++; return { uploadId: "uploads-1", jobId: "jobs-1" } },
-    queryStatus: async () => { counts.status++; return { state: "ready", uploadId: "uploads-1", jobId: "jobs-1", itemId: "items-1" } }
-  })
+test("16: a double-clicked contextual save carries one idempotency key to the server", async () => {
+  // Step 3 moved deduplication to the server: shoppingImports:register is keyed on the
+  // clientImportId, so the client's job is to forward that key UNCHANGED and to never let the
+  // two clicks produce two different keys (which would be two uploads and two credit spends).
+  const registeredKeys = []
+  const sharedUpload = { uploadId: "uploads-1", jobId: "jobs-1" }
+  const remoteImage = {
+    registerRemote: async (_url, registerInput) => {
+      // Stands in for the server's by-clientImportId lookup: a repeat key resolves the same upload.
+      if (registeredKeys.includes(registerInput.clientImportId)) return sharedUpload
+      registeredKeys.push(registerInput.clientImportId)
+      return sharedUpload
+    }
+  }
+  const { saver } = fakeSaver({ terminal: "ready" })
   const adopted = []
   const adopt = async (u) => { adopted.push(u) }
   const replies = []
   // Same clientImportId twice: the retry/reuse path a double click produces.
   await Promise.all([
-    saveRemoteGarment(deps({ saver: real, adoptSavedItem: adopt, reply: (p) => replies.push(p) }), input()),
-    saveRemoteGarment(deps({ saver: real, adoptSavedItem: adopt, reply: (p) => replies.push(p) }), input())
+    saveRemoteGarment(deps({ saver, remoteImage, adoptSavedItem: adopt, reply: (p) => replies.push(p) }), input()),
+    saveRemoteGarment(deps({ saver, remoteImage, adoptSavedItem: adopt, reply: (p) => replies.push(p) }), input())
   ])
-  assert.equal(counts.register, 1, "exactly one registration: no duplicate save and no extra credit")
-  assert.equal(counts.uploadUrl, 1, "no second upload")
+  assert.deepEqual(registeredKeys, ["client-import-1"], "both clicks resolve to one server upload: no duplicate save and no extra credit")
   assert.deepEqual(replies, ["ready", "ready"], "both attempts are answered")
   assert.equal(adopted.length, 2, "each completed request adopts once; the shared save is not repeated")
 })
