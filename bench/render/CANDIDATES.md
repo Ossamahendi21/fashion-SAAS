@@ -158,6 +158,89 @@ try-on implementation is non-commercial. Do not download models anyway.
 
 ---
 
+# Phase C6 — FLUX.2 Klein 4B staged-loading / self-quantization gate
+
+Source-only audit (no weights/inference/installs). Upstream: `black-forest-labs/flux2`
+@ `50fe516` (code), HF `FLUX.2-klein-4B` + `FLUX.2-klein-4b-fp8` cards (Apache-2.0
+throughout, first-party FP8 included), diffusers `Flux2KleinPipeline` source.
+
+## Inference graph (official)
+
+Text encoder Qwen3ForCausalLM (~4B, 8.04 GB in 2 shards) + Qwen2TokenizerFast →
+prompt embeds (3 stacked layer outputs) → transformer Flux2Transformer2DModel
+(3.875B: BF16 7.75 GB / FP8 4.07 GB) + VAE encode (avatar + each ref, once) →
+4-step distilled sampling (guidance-distilled: single forward/step, no CFG
+double) → VAE decode. Refs are VAE latents concatenated on the sequence axis
+with time offsets — positional, unlabeled; no documented max count; no garment
+taxonomy, identity, or try-on validation anywhere in source.
+
+## Staging feasibility (all supported by pipeline design)
+
+- Text encoder: CAN_UNLOAD — `prompt_embeds` accepted directly
+  (`check_inputs` forbids prompt+embeds together, requires one); encoder never
+  touched after `encode_prompt`; official `model_cpu_offload_seq =
+  "text_encoder->transformer->vae"`.
+- Refs: VAE-encode once up front (`prepare_image_latents`), retain tokens;
+  one-by-one encoding is the loop as written; encoded refs survive unload.
+- VAE: STAGING_SUPPORTED — encode → keep latents → unload → sample →
+  reload → decode; latents are plain tensors, no format tricks.
+- So a staged flow is mechanically possible. It does not save the gate below.
+
+## CPU / ARM64
+
+- Reference `flux2` sample hard-codes `.cuda()` (CPU_BLOCKED as distributed);
+  the diffusers pipeline itself is device-agnostic (`pipe.to("cpu")` works
+  syntactically; `maybe_adjust_dtype_for_device` exists). No official CPU
+  support statement found: CPU_POSSIBLE_WITH_SMALL_PATCH at best, BF16-on-CPU
+  behavior UNKNOWN.
+- Deps are standard portable Python (torch/torchvision/transformers/
+  safetensors/tokenizers/diffusers/Pillow/numpy; no custom CUDA ops, triton,
+  flash-attn, or xformers in the inference path) — ARM64 strain low in
+  principle (official aarch64 CPU wheels exist for the torch stack), but
+  irrelevant given RAM.
+- Quantization: torchao documents a CPU install path, but FP8 dynamic/weight
+  configs REQUIRE CUDA ≥8.9/MI350/XPU; int8-dynamic+int4 is documented for
+  X86 CPU specifically (aarch64 status unstated); native dynamic-int8 exists
+  via QNNPACK-class backends but diffusion quality under activation
+  quantization is a known-high risk and unproven here. FP8 weights on CPU
+  would need dequantize-at-load (defeating the memory purpose) or absent
+  kernels. Conclusion: NO_SAFE_QUANTIZATION_PATH for aarch64 CPU production.
+
+## Peak-RAM table (exact HEAD sizes; activations/OS/FlorenceSAM excluded)
+
+| path | static weights | verdict vs ~7–8 GB target |
+|---|---|---|
+| BF16 full | 7.75 + 8.04 = 15.8 GB | FAIL (before activations) |
+| FP8 trans + BF16 text enc | 4.07 + 8.04 = 12.1 GB | FAIL (before activations) |
+| FP8 trans + hypothetical int8 text enc (~4 GB) | ~8.1 GB | BORDERLINE best case, and the int8-ARM-CPU path above is unverified |
+
+Uncertainty: activation memory at 1024×1536 with up to 15 refs is
+unmeasured and scales with sequence length; VAE + runtime + OS + resident
+FlorenceSAM (~3 GB peak) sit on top. No swap-based design.
+
+## Process architecture (not implemented)
+
+Strongest reclamation is process-per-stage (OS reaps on exit; Python/torch
+arenas otherwise retain). Moot: staging cannot fix weights that exceed RAM.
+
+## Coexistence / latency / quality (recorded, not gating further)
+
+- Coexistence: serializing extraction vs rendering (Step-4-style single-flight)
+  would be the pattern; impossible to reach with these footprints.
+- Latency: 4 distilled steps of a 4B transformer + 4B text-encoder pass +
+  up to 16 VAE encodes on 2 vCPU — PLAUSIBLE_BUT_SLOW for 1–3 refs with wide
+  uncertainty, VERY_LIKELY_TOO_SLOW for the 15-ref contract. No numbers invented.
+- Quality risk of any self-quant path: HIGH/UNKNOWN without benchmarks.
+
+## Decision: RESOURCE_REJECT_FLUX2_STAGED
+
+RAM fails on every official path (12.1–15.8 GB static weights vs ~7–8 GB
+target); no safe ARM-CPU quantization path exists; CPU support is
+undocumented with a cuda-hardcoded reference. Contract fit (general editing,
+unvalidated try-on) is secondary. No C7 probe: nothing further can pass.
+
+---
+
 # Phase C5 — Lightweight Stack Sweep (source-only; no downloads/inference/installs)
 
 ## Components inspected (official sources)
