@@ -1,5 +1,5 @@
-// Provider-selection and withoutBG adapter seam, exercised without any network. Assertions cover
-// config gating (default openai, fail-closed), HTTP/error normalization, cost honesty, and the
+// Provider-selection and gateway adapter seams, exercised without any network. Assertions cover
+// config gating (default florencesam, fail-closed), HTTP/error normalization, cost honesty, and the
 // 1024×1024 cutout contract that applies to every provider.
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -25,16 +25,26 @@ registerHooks({
 const {
   ExtractionError,
   EXTRACTION_CUTOUT_SIZE,
+  FLORENCESAM_COST_USD_PER_IMAGE,
   WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT,
   ensureSquareCutout,
   extractionProvider,
+  florenceSamConfig,
+  florenceSamEndpoint,
+  florenceSamExtract,
+  florenceSamHeaders,
+  florenceSamRequest,
   parseWithoutBgBytes,
+  selectLargestBox,
+  selectLargestMask,
   withoutBgConfig,
   withoutBgEndpoint,
   withoutBgHeaders,
   withoutBgRequest,
   withoutBgExtract,
 } = await import("../convex/ai/extraction.ts");
+
+const { extractionNoun, groundingPhrase } = await import("../convex/ai/prompts.ts");
 
 const sharp = (await import("sharp")).default;
 
@@ -65,8 +75,12 @@ function transportOf(body, { status = 200, throwError = null } = {}) {
 
 const kindOf = (error) => (error instanceof ExtractionError ? error.kind : undefined);
 
-test("extraction provider defaults to gpt-image-2 (openai) with no env", () => {
-  assert.equal(extractionProvider({}), "openai");
+test("extraction provider defaults to the free self-hosted florencesam with no env", () => {
+  assert.equal(extractionProvider({}), "florencesam");
+});
+
+test("EXTRACTION_PROVIDER=openai stays available as the explicit legacy reference", () => {
+  assert.equal(extractionProvider({ EXTRACTION_PROVIDER: "openai" }), "openai");
 });
 
 test("EXTRACTION_PROVIDER=withoutbg selects the withoutBG adapter", () => {
@@ -228,5 +242,202 @@ test("ensureSquareCutout rejects non-image bytes as malformed-output", async () 
   await assert.rejects(
     () => ensureSquareCutout(new Uint8Array(new TextEncoder().encode("garbage"))),
     (error) => kindOf(error) === "malformed-output" && error.retryable === false,
+  );
+});
+
+const fsEnv = {
+  FLORENCESAM_BASE_URL: "https://florencesam.example",
+  FLORENCESAM_API_KEY: "florence-secret-value",
+};
+
+const fsConfig = () => florenceSamConfig({ ...fsEnv });
+
+test("florencesam config fails closed when a required server env var is missing", () => {
+  assert.throws(() => florenceSamConfig({ FLORENCESAM_BASE_URL: "https://x" }), /FLORENCESAM_API_KEY/);
+  assert.throws(() => florenceSamConfig({ FLORENCESAM_API_KEY: "k" }), /FLORENCESAM_BASE_URL/);
+});
+
+test("florencesam request targets {baseUrl}/v1/extract with a JSON image+prompt body", () => {
+  assert.equal(florenceSamEndpoint("https://florencesam.example"), "https://florencesam.example/v1/extract");
+  assert.equal(florenceSamEndpoint("https://florencesam.example/"), "https://florencesam.example/v1/extract");
+  const headers = florenceSamHeaders("k");
+  assert.equal(headers["X-API-Key"], "k");
+  assert.equal(headers["Content-Type"], "application/json");
+  assert.equal(headers["Accept"], "image/png");
+  const { url, init } = florenceSamRequest(fsConfig(), new Uint8Array([1, 2, 3]), "a photo of a dress");
+  assert.equal(url, "https://florencesam.example/v1/extract");
+  assert.equal(init.method, "POST");
+  const body = JSON.parse(init.body);
+  assert.deepEqual(new Uint8Array(Buffer.from(body.image, "base64")), new Uint8Array([1, 2, 3]));
+  assert.equal(body.prompt, "a photo of a dress");
+});
+
+test("florencesam rejects a blank garment prompt before any network call", async () => {
+  const { transport, calls } = transportOf(new Uint8Array(0));
+  await assert.rejects(
+    () => florenceSamExtract({ bytes: new Uint8Array([9]), prompt: "   " }, fsConfig(), transport),
+    (error) => kindOf(error) === "invalid-input" && error.retryable === false,
+  );
+  assert.equal(calls.length, 0, "no request may leave the box for a blank prompt");
+});
+
+test("florencesam 200 transparent PNG resolves with $0 spend and no token usage", async () => {
+  const body = await pngBytes({ width: 200, height: 300 });
+  const { transport } = transportOf(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+  const result = await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a dress" }, fsConfig(), transport);
+  assert.equal(result.provider, "florencesam");
+  assert.equal(result.background, "transparent");
+  assert.equal(result.width, 200);
+  assert.equal(result.height, 300);
+  assert.equal(result.costUsd, 0);
+  assert.equal(FLORENCESAM_COST_USD_PER_IMAGE, 0, "external spend is $0 by contract, not an estimate");
+  assert.equal("usage" in result, false, "a self-hosted gateway has no token usage to report");
+});
+
+test("florencesam 200 opaque PNG is classified opaque but still accepted", async () => {
+  const body = await pngBytes({ rgba: false });
+  const { transport } = transportOf(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+  const result = await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a jacket" }, fsConfig(), transport);
+  assert.equal(result.background, "opaque");
+});
+
+test("florencesam non-image or empty bodies are malformed-output, never silently accepted", async () => {
+  for (const body of [new TextEncoder().encode("not an image"), new Uint8Array(0)]) {
+    const { transport } = transportOf(body);
+    await assert.rejects(
+      () => florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a dress" }, fsConfig(), transport),
+      (error) => kindOf(error) === "malformed-output" && error.retryable === false,
+    );
+  }
+});
+
+const fsStatusKind = async (status) => {
+  const { transport } = transportOf(new Uint8Array(0), { status });
+  try {
+    await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a dress" }, fsConfig(), transport);
+  } catch (error) {
+    return error;
+  }
+  return null;
+};
+
+test("florencesam 422 (empty grounding) is a non-retryable invalid input naming the cause", async () => {
+  const error = await fsStatusKind(422);
+  assert.equal(kindOf(error), "invalid-input");
+  assert.equal(error.retryable, false);
+  assert.match(error.message, /no garment for the prompt/);
+});
+
+test("florencesam 401/403 are auth/config with no secret in the message", async () => {
+  for (const status of [401, 403]) {
+    const error = await fsStatusKind(status);
+    assert.equal(kindOf(error), "auth-config");
+    assert.equal(error.retryable, false);
+    assert.equal(error.message.includes("florence-secret-value"), false, "the api key must never leak into an error");
+  }
+});
+
+test("florencesam 408/429 are rate-limited and retryable", async () => {
+  for (const status of [408, 429]) {
+    const error = await fsStatusKind(status);
+    assert.equal(kindOf(error), "rate-limited");
+    assert.equal(error.retryable, true);
+  }
+});
+
+test("florencesam 5xx and network failures are transient and retryable", async () => {
+  const error = await fsStatusKind(502);
+  assert.equal(kindOf(error), "transient");
+  assert.equal(error.retryable, true);
+  const { transport } = transportOf(new Uint8Array(0), { throwError: new Error("ECONNREFUSED") });
+  await assert.rejects(
+    () => florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a dress" }, fsConfig(), transport),
+    (caught) => kindOf(caught) === "transient" && caught.retryable,
+  );
+});
+
+test("gateway network errors name the selected provider, never the other gateway", async () => {
+  const { transport: fsTransport } = transportOf(new Uint8Array(0), { throwError: new Error("ECONNREFUSED") });
+  let florenceMessage = "";
+  try {
+    await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "p" }, fsConfig(), fsTransport);
+  } catch (error) {
+    florenceMessage = error.message;
+  }
+  assert.match(florenceMessage, /Florence\+SAM2/);
+  assert.equal(florenceMessage.includes("withoutBG"), false);
+  const { transport: bgTransport } = transportOf(new Uint8Array(0), { throwError: new Error("ECONNREFUSED") });
+  let withoutBgMessage = "";
+  try {
+    await withoutBgExtract({ bytes: new Uint8Array([0]), prompt: "p" }, config(), bgTransport);
+  } catch (error) {
+    withoutBgMessage = error.message;
+  }
+  assert.match(withoutBgMessage, /withoutBG/);
+  assert.equal(withoutBgMessage.includes("Florence"), false);
+});
+
+test("florencesam 400/415 reject the image permanently with no paid retry semantics", async () => {
+  for (const status of [400, 415]) {
+    const error = await fsStatusKind(status);
+    assert.equal(kindOf(error), "invalid-input");
+    assert.equal(error.retryable, false);
+  }
+});
+
+test("florencesam 413 reports the image as unsupported (too large)", async () => {
+  const error = await fsStatusKind(413);
+  assert.equal(kindOf(error), "unsupported-image");
+});
+
+test("florencesam timeout surfaces as a transient error", async () => {
+  const fakeAbort = (url, init) =>
+    new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => {
+        const error = new Error("The operation was aborted.");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  await assert.rejects(
+    () => florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "p" }, { ...fsConfig(), timeoutMs: 25 }, fakeAbort),
+    (caught) => kindOf(caught) === "transient" && caught.retryable && /Florence\+SAM2/.test(caught.message),
+  );
+});
+
+test("selectLargestBox picks the largest area, first wins ties, empty yields null", () => {
+  assert.deepEqual(selectLargestBox([]), null);
+  assert.deepEqual(selectLargestBox([[0, 0, 0, 0]]), null, "zero-area boxes select nothing");
+  const boxes = [
+    [0, 0, 10, 10],
+    [0, 0, 5, 50],
+    [0, 0, 10, 10],
+  ];
+  assert.deepEqual(selectLargestBox(boxes), { index: 1, box: [0, 0, 5, 50] });
+  assert.deepEqual(selectLargestBox([boxes[0], boxes[2]]), { index: 0, box: boxes[0] });
+});
+
+test("selectLargestMask picks the largest area, first wins ties, empty yields -1", () => {
+  assert.equal(selectLargestMask([]), -1);
+  assert.equal(selectLargestMask([0, 0]), -1);
+  assert.equal(selectLargestMask([10, 50, 50]), 1);
+  assert.equal(selectLargestMask([7]), 0);
+});
+
+test("groundingPhrase uses the fixed validated prefix verbatim", () => {
+  assert.equal(groundingPhrase("dress"), "a photo of a dress");
+  assert.equal(groundingPhrase("  white   sneaker "), "a photo of a white sneaker");
+});
+
+test("extractionNoun prefers the specific subcategory and falls back deterministically", () => {
+  assert.equal(extractionNoun({ category: "dress", subcategory: " slip dress " }), "slip dress");
+  assert.equal(extractionNoun({ category: "top", subcategory: "" }), "top");
+  assert.equal(extractionNoun({ category: "outerwear", subcategory: "   " }), "jacket");
+  assert.equal(extractionNoun({ category: "shoes", subcategory: "low-top trainers" }), "low-top trainers");
+  assert.equal(extractionNoun({ category: "mystery", subcategory: "" }), "garment");
+  assert.equal(
+    extractionNoun({ category: "top", subcategory: "word ".repeat(10).trim() }),
+    "top",
+    "an overlong subcategory falls back instead of grounding noise",
   );
 });

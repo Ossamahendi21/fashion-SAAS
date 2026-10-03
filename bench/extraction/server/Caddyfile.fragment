@@ -1,0 +1,8 @@
+# REQUIRED before production use: Convex actions run in Convex cloud and cannot reach
+# 127.0.0.1 on the VPS. Expose the localhost gateway behind TLS by adding ONE vhost to the
+# EXISTING Caddy setup, mirroring the withoutbg-api vhost style already on this box.
+# Port 18080: 127.0.0.1:8080 is owned by temporal-ui on this box.
+# Replace the hostname with the real public origin, then: sudo systemctl reload caddy.
+florencesam-api.duckdns.org {
+	reverse_proxy 127.0.0.1:18080
+}

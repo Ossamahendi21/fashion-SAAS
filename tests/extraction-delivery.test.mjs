@@ -251,7 +251,7 @@ test("itemReady with token usage (the openai default) keeps the existing usage-t
 });
 
 test("the extraction env keys are typed server env keys", () => {
-  for (const key of ["EXTRACTION_PROVIDER", "WITHOUTBG_BASE_URL", "WITHOUTBG_API_KEY", "WITHOUTBG_COST_USD_PER_IMAGE"]) {
+  for (const key of ["EXTRACTION_PROVIDER", "WITHOUTBG_BASE_URL", "WITHOUTBG_API_KEY", "WITHOUTBG_COST_USD_PER_IMAGE", "FLORENCESAM_BASE_URL", "FLORENCESAM_API_KEY"]) {
     assert.ok(SERVER_ENV_KEYS.includes(key), `${key} must be a typed ServerEnvKey`);
   }
 });
@@ -266,7 +266,7 @@ test("WITHOUTBG_* secrets never reach the client bundle", () => {
       if (entry.isDirectory()) walk(full);
       else if (/\.(ts|tsx)$/.test(entry.name)) {
         const text = readFileSync(full, "utf8");
-        for (const needle of ["WITHOUTBG_API_KEY", "WITHOUTBG_BASE_URL", "NEXT_PUBLIC_EXTRACTION_PROVIDER"]) {
+        for (const needle of ["WITHOUTBG_API_KEY", "WITHOUTBG_BASE_URL", "FLORENCESAM_API_KEY", "FLORENCESAM_BASE_URL", "NEXT_PUBLIC_EXTRACTION_PROVIDER"]) {
           if (text.includes(needle)) offenders.push(`${full}: ${needle}`);
         }
       }
@@ -281,4 +281,81 @@ test("the extraction seam lives inside the single extractItem action; workflows 
   assert.ok(openai.includes(`from "./extraction"`), "openai.ts must consume the seam");
   const ingest = readFileSync(fileURLToPath(new URL("../convex/workflows/ingest.ts", import.meta.url)), "utf8");
   assert.ok(ingest.includes("internal.ai.openai.extractItem"), "the workflow must still call the single extraction entry");
+});
+
+test("extractGarmentCutout defaults to florencesam, normalizes to 1024×1024, and reports $0 spend", async () => {
+  const called = [];
+  const runners = {
+    openai: async () => {
+      called.push("openai");
+      throw new Error("no paid fallback allowed");
+    },
+    withoutbg: async () => {
+      called.push("withoutbg");
+      throw new Error("should not run");
+    },
+    florencesam: async () => {
+      called.push("florencesam");
+      return { bytes: toU8(await pngBytes({ width: 300, height: 200 })), background: "transparent", costUsd: 0, latencyMs: 9 };
+    },
+  };
+  const result = await extractGarmentCutout(
+    { imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p", noun: "dress" },
+    runners,
+    {},
+  );
+  assert.deepEqual(called, ["florencesam"]);
+  assert.equal(result.provider, "florencesam");
+  assert.equal("usage" in result, false);
+  assert.equal(result.costUsd, 0);
+  assert.equal(result.width, 1024, "the cutout contract is enforced for every provider");
+  assert.equal(result.height, 1024);
+});
+
+test("a florencesam failure never fails over to OpenAI or withoutBG", async () => {
+  const transient = new ExtractionError("transient", "The Florence+SAM2 gateway failed (HTTP 502).", 502);
+  const request = { imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p", noun: "dress" };
+  const called = [];
+  const runners = {
+    openai: async () => {
+      called.push("openai");
+      throw new Error("no failover allowed");
+    },
+    withoutbg: async () => {
+      called.push("withoutbg");
+      throw new Error("no failover allowed");
+    },
+    florencesam: async () => {
+      throw transient;
+    },
+  };
+  await assert.rejects(
+    () => extractGarmentCutout(request, runners, { EXTRACTION_PROVIDER: "florencesam" }),
+    (error) => error === transient,
+  );
+  assert.deepEqual(called, [], "a failed default must settle, never spend on another provider");
+});
+
+test("itemReady with the free provider records $0 COGS without faking token usage", async () => {
+  const f = dbFixture();
+  f.seedItem();
+  f.seedJob();
+  await itemReady._handler(f.ctx, {
+    itemId: "item1",
+    jobId: "job1",
+    stepKey: "extract:0",
+    storageId: "cutout-new",
+    hex: ["#123456"],
+    costUsd: 0,
+    embedding: [0.1, 0.2, 0.3],
+    duplicateOfId: undefined,
+  });
+  const item = await f.db.get("item1");
+  assert.equal(item.status, "ready");
+  assert.equal(item.usage, undefined);
+  assert.equal(item.costUsd, 0);
+  const stats = f.tableRows("dailyStats")[0];
+  assert.equal(stats.itemsExtracted, 1);
+  assert.equal(stats.cogsUsd, 0, "free extraction records no external spend");
+  assert.equal(f.tableRows("creditLedger").length, 0, "extraction settlement never touches the credit ledger");
 });

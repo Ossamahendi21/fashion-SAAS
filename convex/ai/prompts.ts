@@ -199,6 +199,37 @@ export function extractionPrompt(description: string): string {
   ].join("\n");
 }
 
+/** Coarse category fallback when an item has no usable subcategory for grounding. */
+const GROUNDING_CATEGORY_NOUN: Record<string, string> = {
+  top: "top",
+  bottom: "bottom",
+  outerwear: "jacket",
+  dress: "dress",
+  shoes: "shoes",
+  accessory: "accessory",
+  bag: "bag",
+  headwear: "hat",
+};
+
+/**
+ * The garment noun the Florence grounding stage locates ("t-shirt", "dress", ...). Prefers the
+ * specific subcategory the detector wrote; falls back to a coarse category noun, then "garment".
+ * Deterministic: same fields always yield the same noun.
+ */
+export function extractionNoun(input: { category: string; subcategory: string }): string {
+  const sub = input.subcategory.trim().replace(/\s+/g, " ");
+  if (sub.length >= 2 && sub.length <= 40 && sub.split(" ").length <= 4) return sub;
+  return GROUNDING_CATEGORY_NOUN[input.category.trim().toLowerCase()] ?? "garment";
+}
+
+/**
+ * The grounding phrase sent to the Florence+SAM2 gateway for one noun. The literal "a photo of a"
+ * prefix matches the validated Step 4 prompt style; it is fixed, never tuned per item.
+ */
+export function groundingPhrase(noun: string): string {
+  return `a photo of a ${noun.trim().replace(/\s+/g, " ")}`;
+}
+
 /** The gpt-image-2 edit prompt that dresses the avatar in every garment of one outfit. */
 export function renderPrompt(input: RenderPromptInput): string {
   const references = input.garments.map(

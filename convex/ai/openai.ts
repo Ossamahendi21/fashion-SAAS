@@ -16,7 +16,9 @@ import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot 
 import { dominantHex } from "./colours";
 import {
   extractGarmentCutout,
+  ExtractionError,
   type ExtractionRunners,
+  florenceSamExtract,
   withoutBgExtract,
 } from "./extraction";
 import { normalizeImageInput } from "./image_input";
@@ -24,7 +26,9 @@ import {
   coerceAdviceResponse,
   coerceStylingResponse,
   detectionInstructions,
+  extractionNoun,
   extractionPrompt,
+  groundingPhrase,
   renderPrompt,
   shoppingAdviceSummary,
   shoppingDetectionInstructions,
@@ -321,7 +325,8 @@ export const summarizeShoppingAdvice = internalAction({
 /**
  * One item: cut it out of its source photo through the extraction seam, store the PNG, read its
  * swatches, embed it and flag it as a duplicate of an existing item when the vectors all but match.
- * The seam dispatches on EXTRACTION_PROVIDER (default gpt-image-2); there is no failover.
+ * The seam dispatches on EXTRACTION_PROVIDER (default florencesam, the free self-hosted path);
+ * there is no failover.
  */
 export const extractItem = internalAction({
   args: { itemId: v.id("items"), jobId: v.id("jobs"), stepKey: v.string() },
@@ -342,6 +347,7 @@ export const extractItem = internalAction({
           imageBytes: await normalizeImageInput(photo, "photo"),
           imageName: "photo",
           prompt: extractionPrompt(item.description),
+          noun: extractionNoun({ category: item.category, subcategory: item.subcategory }),
         },
         extractionRunners(),
       );
@@ -391,9 +397,11 @@ export const extractItem = internalAction({
 });
 
 /**
- * The provider implementations behind the seam. GPT-4's `gpt-image-2` branch keeps its transparent-
- * then-opaque retry and bills from real SDK usage; withoutBG bills a fixed operator-set cost because
- * a self-hosted gateway has no token accounting to quote.
+ * The provider implementations behind the seam. The legacy `gpt-image-2` branch keeps its
+ * transparent-then-opaque retry and bills from real SDK usage; withoutBG bills a fixed
+ * operator-set cost because a self-hosted gateway has no token accounting to quote; the
+ * florencesam branch reports $0 external spend for the same reason. No branch ever calls
+ * another branch: there is no paid fallback.
  */
 function extractionRunners(): ExtractionRunners {
   return {
@@ -415,6 +423,20 @@ function extractionRunners(): ExtractionRunners {
           baseUrl: requireEnv("WITHOUTBG_BASE_URL"),
           apiKey: requireEnv("WITHOUTBG_API_KEY"),
           costUsdPerImage: envNumber("WITHOUTBG_COST_USD_PER_IMAGE", 0.001),
+          timeoutMs: REQUEST_TIMEOUT_MS,
+        },
+      );
+      return { bytes: cut.bytes, background: cut.background, costUsd: cut.costUsd, latencyMs: cut.latencyMs };
+    },
+    florencesam: async (request) => {
+      if (!request.noun.trim()) {
+        throw new ExtractionError("invalid-input", "Florence+SAM2 extraction needs a garment noun.");
+      }
+      const cut = await florenceSamExtract(
+        { bytes: request.imageBytes, prompt: groundingPhrase(request.noun) },
+        {
+          baseUrl: requireEnv("FLORENCESAM_BASE_URL"),
+          apiKey: requireEnv("FLORENCESAM_API_KEY"),
           timeoutMs: REQUEST_TIMEOUT_MS,
         },
       );

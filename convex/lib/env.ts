@@ -15,8 +15,9 @@ export const SERVER_ENV_KEYS = [
   /** "1" enables the internal smoke-test functions in `convex/dev/smoke.ts`; unset everywhere but a scratch deployment. */
   "ALLOW_DEV_SMOKE",
   /**
-   * Which provider cuts garment cutouts: "openai" (default) or "withoutbg". Server-only: read in
-   * `convex/ai/extraction.ts` and never exposed to the client.
+   * Which provider cuts garment cutouts: "florencesam" (default, free self-hosted),
+   * "openai" (legacy reference only, never an automatic fallback) or "withoutbg".
+   * Server-only: read in `convex/ai/extraction.ts` and never exposed to the client.
    */
   "EXTRACTION_PROVIDER",
   /** Server-only self-hosted withoutBG gateway base URL (never NEXT_PUBLIC_). */
@@ -25,6 +26,10 @@ export const SERVER_ENV_KEYS = [
   "WITHOUTBG_API_KEY",
   /** Operator-estimated self-host cost per extraction, recorded as COGS like OpenAI usage would be. */
   "WITHOUTBG_COST_USD_PER_IMAGE",
+  /** Server-only self-hosted Florence+SAM2 gateway base URL (never NEXT_PUBLIC_). */
+  "FLORENCESAM_BASE_URL",
+  /** Server-only private gateway key for the Florence+SAM2 gateway (never NEXT_PUBLIC_, never in logs). */
+  "FLORENCESAM_API_KEY",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];

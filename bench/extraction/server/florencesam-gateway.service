@@ -1,0 +1,37 @@
+[Unit]
+Description=Florence+SAM2 garment extraction gateway (Step 4, CPU only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=florencesam
+Group=florencesam
+WorkingDirectory=/opt/fashion-florencesam/gateway
+ExecStart=/opt/fashion-florencesam/venv-sam/bin/python /opt/fashion-florencesam/gateway/florencesam_gateway.py
+# Port 18080: 127.0.0.1:8080 is owned by temporal-ui on this box.
+Environment=PORT=18080
+Environment=HF_HUB_CACHE=/opt/fashion-florencesam/hf-hub
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+# Trust_remote_code modules resolve from this writable cache, never from branch refs.
+Environment=HF_MODULES_CACHE=/opt/fashion-florencesam/hf-hub/modules
+# Pinned snapshots (immutable revisions; match install.sh or the service fails closed offline).
+Environment=FLORENCE_MODEL_PATH=/opt/fashion-florencesam/hf-hub/models--microsoft--Florence-2-base/snapshots/5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac
+Environment=SAM2_MODEL_PATH=/opt/fashion-florencesam/hf-hub/models--facebook--sam2.1-hiera-tiny/snapshots/de431c4043854a71d8101e17995dfe596bf101a5
+Environment=HOME=/opt/fashion-florencesam
+Environment=FLORENCE_VENV_PYTHON=/opt/fashion-florencesam/venv-flor/bin/python
+Environment=FLORENCE_TIMEOUT_S=280
+EnvironmentFile=/etc/florencesam-gateway.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/fashion-florencesam/hf-hub
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
