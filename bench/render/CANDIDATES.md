@@ -158,6 +158,43 @@ try-on implementation is non-commercial. Do not download models anyway.
 
 ---
 
+# Phase C8 — Direct gpt-image-2 Replacement Sweep (source/license metadata only)
+
+## Discovery shortlist (max 5 examined, none survive)
+
+- **DreamLite 0.39B** (ByteVisionLab, 4-step, on-device editing): code
+  Apache-2.0 BUT weights file states **CC BY-NC 4.0**. LICENSE_REJECT
+  (textbook code≠weights split).
+- **DeepGen 1.0** (5B = 3B VLM + 2B DiT, Apache-2.0 cards, general editing):
+  ~10 GB BF16 static before VAE/activations/runtime, trained at 512px,
+  single-image editing only. RESOURCE_REJECT (no headroom on this box).
+- **Show-o 1.3B** (Apache repo, MIT card, ~2.6 GB): fits RAM, but single-image
+  text-guided inpainting at 512px with NO visual-reference garment
+  conditioning and GenEval-class quality. CONTRACT_REJECT (no garment
+  fidelity mechanism; far below the photographic try-on bar).
+- **BAGEL 7B/14B** (Apache-2.0, strong edit benchmarks): official guidance is
+  22–32 GB VRAM class. RESOURCE_REJECT.
+- **Lance 3B** (Apache-2.0, image_edit task): files total ~16.5 GB
+  (12.4 + 1.3 + 2.8). RESOURCE_REJECT.
+
+## Quick rejects (no deep dive needed)
+
+- FLUX.1-Kontext [dev]: non-commercial license.
+- Qwen-Image-Edit 2509/2511, Step1X-Edit v1.2: same oversized lines as Phase C3.
+- Paid/hosted editors and trial-credit APIs: excluded by the no-free-API-trap
+  rule (usage controlled by provider, not us).
+
+## Why no finalist
+
+Every small-enough editor lacks visual garment conditioning or photographic
+quality; every capable editor is 2–5× over the RAM budget or non-commercial.
+No DIRECT_REPLACEMENT or SMALL_ADAPTER candidate exists on current
+infrastructure. No C9 benchmark is defined (nothing to bench).
+
+## Decision: NO_DIRECT_OPEN_SOURCE_RENDER_CANDIDATE
+
+---
+
 # Phase C6 — FLUX.2 Klein 4B staged-loading / self-quantization gate
 
 Source-only audit (no weights/inference/installs). Upstream: `black-forest-labs/flux2`
