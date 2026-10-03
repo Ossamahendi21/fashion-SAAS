@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "target": { "width": 1024, "height": 1536, "format": "png", "opaque": true, "aspect": "2:3" },
+  "fixturesDir": "bench/render/fixtures",
+  "notes": "Fixture images are operator-supplied at benchmark time and are NEVER committed (no user private photos in the repo). Paths below are the fixed locations Phase C must populate. See bench/render/README.md.",
+  "cases": [
+    {
+      "id": "TOP_BASIC",
+      "person": "bench/render/fixtures/person-frontal-01.png",
+      "garments": [{ "path": "bench/render/fixtures/garment-tee-01.png", "slot": "top", "category": "top" }],
+      "aspect": "2:3",
+      "tests": "Single top on a clean frontal person. Baseline: identity preservation and basic garment fidelity."
+    },
+    {
+      "id": "BOTTOM_BASIC",
+      "person": "bench/render/fixtures/person-frontal-01.png",
+      "garments": [{ "path": "bench/render/fixtures/garment-jeans-01.png", "slot": "bottom", "category": "bottom" }],
+      "aspect": "2:3",
+      "tests": "Single bottom. Baseline leg-region fidelity and framing below the waist."
+    },
+    {
+      "id": "ONE_PIECE",
+      "person": "bench/render/fixtures/person-frontal-02.png",
+      "garments": [{ "path": "bench/render/fixtures/garment-dress-01.png", "slot": "dress", "category": "dress" }],
+      "aspect": "2:3",
+      "tests": "One-piece dress. Single-garment full-torso coverage."
+    },
+    {
+      "id": "TOP_BOTTOM",
+      "person": "bench/render/fixtures/person-frontal-01.png",
+      "garments": [
+        { "path": "bench/render/fixtures/garment-tee-01.png", "slot": "top", "category": "top" },
+        { "path": "bench/render/fixtures/garment-jeans-01.png", "slot": "bottom", "category": "bottom" }
+      ],
+      "aspect": "2:3",
+      "tests": "Two-garment outfit. Explicitly tests whether the candidate preserves BOTH garments (single-garment pipelines typically drop one)."
+    },
+    {
+      "id": "LAYERED",
+      "person": "bench/render/fixtures/person-frontal-02.png",
+      "garments": [
+        { "path": "bench/render/fixtures/garment-tee-01.png", "slot": "top", "category": "top" },
+        { "path": "bench/render/fixtures/garment-jeans-01.png", "slot": "bottom", "category": "bottom" },
+        { "path": "bench/render/fixtures/garment-jacket-01.png", "slot": "outerwear", "category": "outerwear" }
+      ],
+      "aspect": "2:3",
+      "tests": "Top + bottom + outerwear. Exposes single-garment candidate limitations and layering correctness."
+    },
+    {
+      "id": "DETAIL_FIDELITY",
+      "person": "bench/render/fixtures/person-frontal-01.png",
+      "garments": [{ "path": "bench/render/fixtures/garment-graphic-tee-01.png", "slot": "top", "category": "top" }],
+      "aspect": "2:3",
+      "tests": "Patterned/printed/logo-sensitive garment. Tests color fidelity, print reproduction, and text/logo hallucination."
+    },
+    {
+      "id": "HARD_PERSON",
+      "person": "bench/render/fixtures/person-hard-01.png",
+      "garments": [{ "path": "bench/render/fixtures/garment-tee-01.png", "slot": "top", "category": "top" }],
+      "aspect": "2:3",
+      "tests": "Difficult person input (headshot/non-full-body, unusual pose, or occlusion). Tests identity preservation and full-body framing behavior."
+    }
+  ]
+}

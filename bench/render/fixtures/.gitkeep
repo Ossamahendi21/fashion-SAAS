@@ -1,0 +1,2 @@
+Operator-supplied benchmark fixtures live here at benchmark time and are never committed.
+See bench/render/manifest.json for the fixed paths and bench/render/README.md for rules.

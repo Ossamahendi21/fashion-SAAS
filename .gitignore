@@ -59,3 +59,6 @@ artifacts/verification/
 
 # Extraction benchmark artifacts (generated fixtures and reports, never committed)
 bench/extraction/.out/
+
+# Render benchmark artifacts (generated outputs and reports, never committed)
+bench/render/.out/
