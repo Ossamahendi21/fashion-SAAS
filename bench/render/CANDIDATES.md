@@ -102,4 +102,67 @@ CC-BY-SA (share-alike encumbrance unresolved for SaaS); (3) SCHP-ONNX and
 OpenPose weight provenance is unstated. Added weight: dual-UNet diffusion at
 50 steps has no plausible CPU story on 2 vCPU beside FlorenceSAM, and the
 contract covers at most 3 of our 10 fit needs with no multi-garment path.
+
+---
+
+# Phase C3 final landscape (source-only; no downloads/inference/installs)
+
+## Checked and rejected
+
+- **FastFit** (multi-ref tops/bottoms/dresses/shoes/bags — closest contract match):
+  official repo license is **FastFit Non-Commercial** covering all code/weights.
+  LICENSE_REJECT. (Paper itself CC BY-NC-SA.)
+- **Mobile-VTON** (tmllab official): code+checkpoints **CC BY-NC-SA 4.0**.
+  LICENSE_REJECT.
+- **CatVTON / IDM-VTON / OOTDiffusion**: remain excluded (non-commercial, Phase B).
+- **Kolors / Kolors-Virtual-Try-On**: code Apache-2.0 BUT models under a separate
+  MODEL LICENSE — academic-open, commercial use requires questionnaire +
+  registration with the licensor. VTON exists only as a demo Space; no released
+  VTON weights found. COMMERCIAL_WITH_REGISTRATION — excluded until registered,
+  and unbenchmarkable as a weight drop-in today.
+- **Qwen-Image-Edit**: Apache-2.0 verified (repo + HF card). ~20B MMDiT + 7B
+  Qwen2.5-VL + VAE ≈ 27B params (~40–57 GB official footprint, BF16); docs use
+  `device_map="cuda"`; only community GGUF quants exist (excluded for production
+  qualification). RESOURCE_REJECT on the official path.
+- **Step1X-Edit**: Apache-2.0 verified. Official `step1x-edit-v1p1` safetensors is
+  **24.9 GB** plus a Qwen2.5-VL-7B text encoder; third-party notes suggest 40 GB+
+  VRAM class. RESOURCE_REJECT (no official quant path).
+- **OmniGen v1** (Shitao/OmniGen-v1, MIT verified, 3.9B params): multi-image
+  memory table from official docs — 14 GB (256px inputs) to 40 GB (1024px) — and
+  our contract needs up to 15 references at 1024×1536. RESOURCE_REJECT.
+- **FLUX.1-schnell**: Apache-2.0 verified, but 11.9B BF16 (~24 GB) and T2I-only
+  (no editing/try-on path). RESOURCE_REJECT, doubly disqualified.
+- **InstructPix2Pix** (timbrooks card: MIT, 860M params — fits in RAM): single-
+  image text-instruction editing only; no visual-reference garment conditioning,
+  no multi-reference. Contract-rejected (not a try-on substitute).
+
+## Serious survivors (max 3): none
+
+No checked candidate passes license + footprint + contract together. The
+architecturally closest match (FastFit) is license-blocked; the commercially
+safe ones are either far too large for 12 GB or contract-incompatible.
+
+## Outfit-level reality (2026)
+
+Single-garment diffusion VTON is a crowded research field; multi-reference
+outfit try-on has exactly one serious open implementation (FastFit) and it is
+non-commercial. General editors with commercial licenses (Qwen-Edit, Step1X,
+OmniGen, FLUX-schnell) are 4–27B-parameter GPU models with no multi-garment
+try-on contract. There is currently no commercial-safe, released,
+resource-compatible model matching our full outfit contract.
+
+## Decision: NO_COMMERCIAL_CANDIDATE
+
+Primary blocker is licensing: every technically relevant multi-reference
+try-on implementation is non-commercial. Do not download models anyway.
+
+## Minimum constraint change to unblock (pick one, product decision)
+
+1. Obtain a commercial license for FastFit-class multi-reference VTON
+   (repo directs to LavieAI) — plus GPU capacity, since even SD1.5-class
+   diffusion wants a GPU for sane latency.
+2. Add a GPU machine — makes commercial-safe large editors runnable, but the
+   multi-reference contract gap remains for all of them.
+3. Reduce the contract to deterministic compositing (product-scope alternative,
+   explicitly not a photographic provider substitute).
 REJECT_LEFFA: do not download weights to prove failure.
