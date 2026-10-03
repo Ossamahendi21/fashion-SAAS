@@ -164,5 +164,49 @@ try-on implementation is non-commercial. Do not download models anyway.
 2. Add a GPU machine — makes commercial-safe large editors runnable, but the
    multi-reference contract gap remains for all of them.
 3. Reduce the contract to deterministic compositing (product-scope alternative,
-   explicitly not a photographic provider substitute).
+explicitly not a photographic provider substitute).
+
+---
+
+# Phase C4 gate — FLUX.2 Klein 4B (black-forest-labs): RESOURCE_REJECT_FLUX2
+
+Source-only audit (no weights/inference/installs). Upstream inspected:
+`black-forest-labs/flux2` @ `50fe516`, HF `FLUX.2-klein-4B` + `FLUX.2-klein-4b-fp8`
+cards. License is clean (Apache-2.0 code AND weights, including the FP8
+variant) — this rejection is resource + contract, not license.
+
+## Verified facts
+
+- 4B rectified-flow transformer with official text-to-image + single/multi-ref
+  editing in one model (official table confirms all three for the 4B; 9B/dev are
+  non-commercial — 4B only).
+- Exact weights (HEAD sizes): transformer BF16 7.75 GB, FP8 4.07 GB; text
+  encoder (Qwen3-class ~4B) 8.04 GB across 2 shards. VAE small.
+- Multi-reference = image list VAE-encoded and concatenated on the sequence
+  axis (`encode_image_refs`, `_blend_*_mods`); references are positional, NOT
+  semantically labeled per garment; no documented max count; no garment
+  taxonomy, identity-preservation, or try-on validation anywhere in source.
+- Official sample code hard-codes `.cuda()` (`sampling.py:72`); all documented
+  invocations use `device_map="cuda"` (MPS mentioned, CPU never documented).
+  Reference implementation: CPU_BLOCKED as distributed.
+- Distilled 4-step default for production (50-step base); requires-python
+  >=3.10,<3.13 (fits Ubuntu 24.04); deps are standard CPU-portable Python
+  (torch/torchvision/transformers/safetensors/einops, no custom CUDA ops,
+  no triton/flash-attn/xformers) — so ARM64 strain is low in principle, but
+  moot given below.
+- Contract: 1 avatar + 1024×1536 + photographic output = supported mechanics;
+  everything garment-specific (tops/bottoms/dresses/outerwear/shoes/
+  accessories, identity, logos) = UNKNOWN/POSSIBLY_WITH_PROMPTING, unproven.
+
+## Why it fails
+
+- BF16 path: 15.8 GB weights alone > 12 GB box. FP8 path: 4.07 + 8.04 =
+  12.1 GB weights alone, before VAE, activations (15 references inflate the
+  sequence), OS, and resident FlorenceSAM. The 8 GB text encoder single-handedly
+  breaks both paths, and no OFFICIAL quantized text encoder exists
+  (third-party quants excluded by rule). RESOURCE_REJECT.
+- CPU path is officially undocumented and the reference code is cuda-hardcoded;
+  coexistence options (B/C) are moot inside this RAM budget — pattern D,
+  impossible, so no deployment pattern is designed.
+- Stability section omitted intentionally: rejected candidates get no design.
 REJECT_LEFFA: do not download weights to prove failure.
