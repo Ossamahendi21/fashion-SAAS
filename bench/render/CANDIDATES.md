@@ -58,3 +58,48 @@ below; everything still requiring a run is marked TO VERIFY IN PHASE C.
    images; a try-on model conditions differently (garment image + category + pose
    inputs). TO VERIFY IN PHASE C: exactly which inputs drive quality and what the
    production adapter would need to synthesize per request.
+
+---
+
+# Phase C2 gate — Leffa (franciszzj/Leffa @ 05a2591): REJECT_LEFFA
+
+Source-only audit (no weights/inference/installs). Do not download weights to
+re-prove what the source already shows.
+
+## Verified facts
+
+- Code is MIT, but the normal VTON path hard-requires, per case:
+  DensePose via vendored detectron2 + `model_final_162be9.pkl` (zoo weights under
+  CC-BY-SA 3.0 per the vendored MODEL_ZOO.md — share-alike terms need counsel
+  before SaaS use, not a plain commercial-safe grant); SCHP parsing via
+  `parsing_atr/lip.onnx` of unstated converter provenance (plus original
+  GoGoDuck `.pth` files in the same bundle); OpenPose via ControlNet-style
+  annotator code carrying CMU's academic/noncommercial license file in-tree and
+  a `body_pose_model.pth` of unstated provenance; SD-inpainting base under
+  CreativeML Open RAIL-M (restrictions apply); Leffa checkpoints trained on
+  academic VITON-HD/DressCode data per the author's own demo note.
+- Preprocessing is NOT optional: `Parsing` (atr+lip CPU-ONNX), `OpenPose`
+  (.pth), and `DensePosePredictor` (detectron2 pickle) are all constructed and
+  called on the VTON path (`app.py` wiring; `get_agnostic_mask_hd/dc` consume
+  parse + keypoints; densepose seg/iuv feeds the diffusion input).
+- Footprint: dual SD1.5-class UNets + VAE at 768×1024, default 50 diffusion
+  steps with CFG (2 UNet forwards/step + per-step reference encoder without
+  `ref_acceleration`); model defaults to float16 even on CPU; no CPU offload,
+  no quantization path in source. Expect multi-GB RSS and very long 2-vCPU
+  runs — TO VERIFY figures were never reached because licensing already fails.
+- Contract: single garment only (`upper_body`/`lower_body`/`dresses`; no
+  outerwear/shoes/accessories); no multi-garment or sequential support in source.
+- aarch64/CPU: torch/onnxruntime/diffusers/transformers are portable in
+  principle, but detectron2 arrives as vendored CUDA/C++ source requiring a
+  from-source build, `requirements.txt` is version-unpinned (incl. `triton`),
+  and OpenPose weights have no stated commercial terms.
+
+## Decision rationale
+
+Three independent hard gates, any one sufficient: (1) OpenPose annotator code
+is explicitly academic/noncommercial in-tree; (2) DensePose zoo weights are
+CC-BY-SA (share-alike encumbrance unresolved for SaaS); (3) SCHP-ONNX and
+OpenPose weight provenance is unstated. Added weight: dual-UNet diffusion at
+50 steps has no plausible CPU story on 2 vCPU beside FlorenceSAM, and the
+contract covers at most 3 of our 10 fit needs with no multi-garment path.
+REJECT_LEFFA: do not download weights to prove failure.
