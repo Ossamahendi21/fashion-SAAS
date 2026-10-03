@@ -241,6 +241,56 @@ unvalidated try-on) is secondary. No C7 probe: nothing further can pass.
 
 ---
 
+# Phase C7 — Native VTON Candidate Sweep (source/license metadata only)
+
+## Discovery list (early rejects)
+
+- **StableVITON** (rlawjdghek, CVPR 2024, PBE-based, zero cross-attention):
+  repo license CC BY-NC-SA 4.0 → LICENSE_REJECT.
+- **LaDI-VTON** (miccunifi): CC BY-NC 4.0 → LICENSE_REJECT.
+- **IMAGDressing-v1** (muzishen, AAAI 2025, Apache-2.0 code, garment-UNet
+  single-forward + SD1.5): official README restricts all downloadable
+  checkpoints to non-commercial research only → LICENSE_REJECT at weight
+  level (strongest near-miss architecturally: efficient single garment
+  forward, IP-Adapter/ControlNet-compatible).
+- **CP-VTON+** (minar09, MIT code): 2020-era GAN at 192×256, needs OpenPose
+  (NC) + CIHP parsing → quality + preprocessing reject.
+- **DM-VTON** (KiseKloset): CC BY-NC-SA → LICENSE_REJECT.
+- **CatVTON mask-free variant**: same CC BY-NC-SA as base → excluded.
+- **DreamFit** (ByteDance): needs OpenPose annotators (NC) + flux-dev (NC) +
+  flash-attn (CUDA-only build) → multi-reject.
+- **PF-AFN / FS-VTON / VITON-HD / GP-VTON / HR-VITON / DCI-VTON / LaDI /**
+  academic GAN/flow lines: no commercial-safe released production checkpoint
+  surfaced; 2020–2022 quality far below the photographic bar → class reject.
+- **Google Vertex AI try-on wrappers** (e.g. community Flask apps): paid API,
+  not self-hosted → violates $0/self-hosted outright.
+- **AnyFit** (NeurIPS 2024, multi-garment Hydra attention — architecturally the
+  closest match to our outfit contract): paper only in surfaced sources, no
+  official released weights found → unreleased-weights reject.
+
+## Nearest near-miss (watchlist, NOT a survivor)
+
+- **AnyDressing** (Crayon-Shinchan, CVPR 2025, MIT code): native multi-garment
+  dressing (GarmentsNet parallel encoding + instance-level localization) —
+  but no released inference weights found ("inference code coming soon").
+  Re-evaluate ONLY if weights release with commercial-safe terms; until then
+  it is unbenchmarkable and changes nothing.
+
+## Serious survivors: none
+
+No native VTON system found with released weights + commercial-safe full
+license chain + CPU-plausible footprint. The single-garment field is entirely
+NC-licensed or NC-preprocessing-dependent; the multi-garment field
+(AnyFit/AnyDressing/FastFit) is unreleased-or-NC without exception.
+
+## Decision: NO_NATIVE_VTON_PRODUCTION_CANDIDATE
+
+No C8 benchmark target exists. Re-open only on a material delta (e.g.
+AnyDressing weights release with commercial terms, or a FastFit commercial
+license) — a new Phase C task, not silent re-evaluation.
+
+---
+
 # Phase C5 — Lightweight Stack Sweep (source-only; no downloads/inference/installs)
 
 ## Components inspected (official sources)
