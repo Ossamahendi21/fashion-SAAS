@@ -1,12 +1,31 @@
 # Candidate notes — FASHN VTON v1.5 (primary technical candidate)
 
-Status: UNTESTED. Everything below is a contract gap Phase C must prove, not a claim.
-Each item is marked TO VERIFY IN PHASE C where evidence is still missing.
+Status: Phase C1 SOURCE GATE COMPLETE (no weights, no inference). Source-derived facts
+below; everything still requiring a run is marked TO VERIFY IN PHASE C.
 
-## What the brief already establishes
+## Phase C1 verified source facts (2026-10-03)
 
-- Main repo is Apache-2.0; roughly 2 GB weights; documented CPU mode with float32 conversion.
-- Native contract is person + ONE garment (categories: tops, bottoms, one-pieces).
+- Upstream SHAs inspected: fashn-vton-1.5 `7c0f10a`, fashn-human-parser `f2771f2`,
+  NVlabs/SegFormer `65fa8cf`.
+- Main repo license is Apache-2.0, BUT the pipeline hard-requires
+  `fashn-human-parser>=0.1.1`, whose LICENSE states the model inherits the NVIDIA
+  SegFormer Source Code License (research/evaluation-only, Sec. 3.3). The Apache-2.0
+  branding does not cover the parser dependency.
+- Parser is NOT optional: top-level import (`pipeline.py:11`), always initialized
+  (`_setup_hp_model`), and runs on BOTH person and garment images on every call
+  (`pipeline.py:266-267`), including `segmentation_free=True` and flat-lay garments.
+- Native resolution 864×576 (2:3 portrait); default 30 diffusion timesteps with CFG
+  (two model forwards per step); CPU forces float32; weights ~2 GB total per README.
+- DWPose runs via ONNX Runtime (CPU-portable in principle); pyproject defaults to
+  `onnxruntime-gpu` (needs CPU substitution on our box).
+- Replacement interface (for any commercial-safe parser): RGB uint8 in →
+  (H,W) int map over the exact 18-class FASHN taxonomy (background/face/hair/top/
+  dress/skirt/pants/belt/bag/hat/scarf/glasses/arms/hands/legs/feet/torso/jewelry)
+  at 384×576 preprocessing; body-part labels (arms/hands/legs/feet/torso) are
+  consumed by `create_clothing_agnostic_image`, so phrase-grounded object masks
+  alone are insufficient.
+- No drop-in commercial-safe replacement with this exact taxonomy exists in-repo;
+  ATR/LIP-family parsers lack hands/feet/torso as separate labels.
 
 ## Gaps to prove in Phase C
 
