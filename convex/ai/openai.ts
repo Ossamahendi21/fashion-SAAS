@@ -22,6 +22,7 @@ import {
   withoutBgExtract,
 } from "./extraction";
 import { normalizeImageInput } from "./image_input";
+import { renderOutfitImage, type RenderRequest, type RenderRunnerResult } from "./rendering";
 import {
   coerceAdviceResponse,
   coerceStylingResponse,
@@ -467,10 +468,16 @@ export const renderImage = internalAction({
       const wearable = garments.filter((_, index) => blobs[index] !== null);
       if (wearable.length === 0) throw appError("NOT_FOUND", "None of this outfit's cutouts are available.");
 
-      const files = [await toImageFile(avatar, "person")];
+      const person = { bytes: await normalizeImageInput(avatar, "profile photo"), name: "person" };
       // Decode one reference at a time to bound memory for large photos and layered outfits.
+      const garmentRefs: Array<{ bytes: Uint8Array; name: string }> = [];
       for (const [index, blob] of blobs.entries()) {
-        if (blob) files.push(await toImageFile(blob, `garment-${index + 1}`));
+        if (blob) {
+          garmentRefs.push({
+            bytes: await normalizeImageInput(blob, `garment-${index + 1}`),
+            name: `garment-${index + 1}`,
+          });
+        }
       }
 
       prompt = renderPrompt({
@@ -481,14 +488,11 @@ export const renderImage = internalAction({
         missingSlots: missingSlots(wearable.map((garment) => garment.slot)),
       });
 
-      const response = await editImage({
-        image: files,
-        prompt,
-        size: "1024x1536",
-        quality: context.quality === "hq" ? "high" : "medium",
-      });
-      const { bytes, usage } = decodeImage(response);
-      const storageId = await ctx.storage.store(pngBlob(bytes));
+      const result = await renderOutfitImage(
+        { person, garments: garmentRefs, prompt, quality: context.quality },
+        { openai: renderOpenaiImage },
+      );
+      const storageId = await ctx.storage.store(pngBlob(result.bytes));
 
       await ctx.runMutation(internal.ai.pipeline.renderDone, {
         renderId: args.renderId,
@@ -496,7 +500,8 @@ export const renderImage = internalAction({
         stepKey: args.stepKey,
         storageId,
         prompt,
-        usage,
+        usage: result.usage,
+        costUsd: result.costUsd,
       });
       return null;
     } catch (error) {
@@ -607,10 +612,24 @@ function imageUsage(usage: ImagesResponse["usage"]): TokenUsage {
   };
 }
 
-/** iPhone HDR JPEGs may contain an MPO gain map that image providers reject. */
-async function toImageFile(blob: Blob, name: string): Promise<File> {
-  const bytes = await normalizeImageInput(blob, name === "person" ? "profile photo" : name);
-  return toFile(bytes, `${name}.png`, { type: "image/png" });
+/**
+ * The only implemented render runner: gpt-image-2 edit at 1024x1536, medium/high mapped
+ * from the billing quality, PNG output, costed from real SDK token usage.
+ */
+async function renderOpenaiImage(request: RenderRequest): Promise<RenderRunnerResult> {
+  const started = Date.now();
+  const files = [await toFile(request.person.bytes, `${request.person.name}.png`, { type: "image/png" })];
+  for (const garment of request.garments) {
+    files.push(await toFile(garment.bytes, `${garment.name}.png`, { type: "image/png" }));
+  }
+  const response = await editImage({
+    image: files,
+    prompt: request.prompt,
+    size: "1024x1536",
+    quality: request.quality === "hq" ? "high" : "medium",
+  });
+  const { bytes, usage } = decodeImage(response);
+  return { bytes, usage, costUsd: usageToUsd(usage), latencyMs: Date.now() - started };
 }
 
 async function embedText(input: string): Promise<number[]> {

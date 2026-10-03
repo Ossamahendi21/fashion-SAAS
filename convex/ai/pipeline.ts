@@ -447,16 +447,18 @@ export const renderDone = internalMutation({
     stepKey: v.string(),
     storageId: v.id("_storage"),
     prompt: v.string(),
-    usage: vTokenUsage,
+    usage: v.optional(vTokenUsage),
+    /** Provider COGS without SDK token accounting (a future $0 provider passes 0). */
+    costUsd: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
     await setRenderPrompt(ctx, args.renderId, args.prompt);
-    await markRenderDone(ctx, args.renderId, { storageId: args.storageId, usage: args.usage });
+    await markRenderDone(ctx, args.renderId, { storageId: args.storageId, usage: args.usage, costUsd: args.costUsd });
     await appendResult(ctx, args.jobId, args.renderId);
     await setStep(ctx, args.jobId, args.stepKey, {
       status: "done",
-      meta: { renderId: args.renderId, costUsd: usageToUsd(args.usage) },
+      meta: { renderId: args.renderId, costUsd: args.costUsd ?? (args.usage ? usageToUsd(args.usage) : 0) },
     });
     return null;
   },

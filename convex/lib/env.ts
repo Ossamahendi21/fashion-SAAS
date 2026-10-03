@@ -30,6 +30,8 @@ export const SERVER_ENV_KEYS = [
   "FLORENCESAM_BASE_URL",
   /** Server-only private gateway key for the Florence+SAM2 gateway (never NEXT_PUBLIC_, never in logs). */
   "FLORENCESAM_API_KEY",
+  /** Which provider renders try-on images: "openai" (default, gpt-image-2). Server-only. */
+  "RENDER_PROVIDER",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];

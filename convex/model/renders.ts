@@ -52,13 +52,19 @@ export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?
 export async function markRenderDone(
   ctx: MutationCtx,
   renderId: Id<"renders">,
-  result: { storageId: Id<"_storage">; usage?: TokenUsage },
+  result: { storageId: Id<"_storage">; usage?: TokenUsage; costUsd?: number },
 ): Promise<void> {
-  const costUsd = result.usage ? usageToUsd(result.usage) : 0;
+  // A successful render must always carry an accounting source: real token usage, or an
+  // explicit cost (including exactly 0 from a self-hosted provider). Anything else fails
+  // closed here so no code path can settle an uncosted render as done.
+  if (result.usage === undefined && result.costUsd === undefined) {
+    throw appError("INVALID_INPUT", "Render settlement needs usage or an explicit costUsd.");
+  }
+  const costUsd = result.costUsd ?? (result.usage ? usageToUsd(result.usage) : 0);
   await ctx.db.patch(renderId, {
     storageId: result.storageId,
     usage: result.usage,
-    costUsd: result.usage ? costUsd : undefined,
+    costUsd: result.usage !== undefined || result.costUsd !== undefined ? costUsd : undefined,
     status: "done",
     completedAt: Date.now(),
   });
