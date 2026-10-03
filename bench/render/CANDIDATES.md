@@ -156,6 +156,76 @@ resource-compatible model matching our full outfit contract.
 Primary blocker is licensing: every technically relevant multi-reference
 try-on implementation is non-commercial. Do not download models anyway.
 
+---
+
+# Phase C5 — Lightweight Stack Sweep (source-only; no downloads/inference/installs)
+
+## Components inspected (official sources)
+
+- **SD1.5-inpainting base** (`runwayml/stable-diffusion-inpainting`, Open RAIL-M):
+  UNet 860M-class + VAE + CLIP-L; ~1.1B total ≈ 4.3 GB FP32 / ~2.2 GB FP16
+  (architecture-derived estimate, TO VERIFY). Commercial use allowed with
+  RAIL behavioral restrictions. CPU-runnable in principle, no official CPU
+  perf path; 20–50 diffusion steps × CFG on 2 vCPU implies minutes per image
+  by scaling from our measured 232M-model CPU timings (rough estimate only).
+- **IP-Adapter / IP-Adapter-Plus** (tencent-ailab code + h94 weights, both
+  Apache-2.0): 22M adapter + OpenCLIP-ViT-H-14 image encoder (632M params,
+  2.53 GB safetensors). Global embeddings = style-level guidance; Plus variant
+  uses patch embeddings ("closer to the reference") but remains non-spatial
+  conditioning — WEAK for exact print/logo placement. OpenCLIP weight license
+  itself not re-verified here → would need confirmation before production.
+- **ControlNet 1.x** (lllyasviel code Apache-2.0; control checkpoints tagged
+  Open RAIL on HF): pose/depth/canny spatial control; needs a pose detector.
+  OpenPose path is NC-blocked (Phase C2); MediaPipe BlazePose (Apache-2.0,
+  on-device, CPU/aarch64-plausible, ~tens of MB) is the commercial-safe pose
+  substitute, outputs 33 landmarks only (no IUV/parse).
+- **FlorenceSAM reuse**: approved ONLY for garment masks/boxes/region
+  segmentation. It provides no pose keypoints, no DensePose/IUV, no semantic
+  human-part parsing — strict limit, no exceptions.
+
+## Serious stacks (max 3 considered, none survive)
+
+- **Stack A (SD-inpaint + IP-Adapter-Plus + FlorenceSAM masks + MediaPipe pose):**
+  licenses RAIL-M/Apache-2.0 except OpenCLIP encoder weight terms unverified
+  → cannot proceed. Fidelity WEAK regardless (non-spatial reference).
+- **Stack B (Stack A + ControlNet-openpose via MediaPipe skeleton):** adds
+  OpenRAIL control weights + ~400M+ resident + second diffusion-conditioning
+  path; still no spatial garment transfer. Rejected: heavier, same fidelity gap.
+- **Stack C (sequential per-garment inpainting passes):** multiplies Stack A
+  latency ×N with identity drift, garment overwrite, and artifact accumulation
+  risks; officially demonstrated nowhere. Rejected: UNPROVEN + compounds risks.
+
+## Contract matrix (best stack, Stack A)
+
+Avatar/person: SUPPORTED_FROM_SOURCE. Tops/bottoms/dresses/outerwear/shoes/
+accessories: no garment taxonomy exists — POSSIBLY_WITH_PROMPTING at best,
+effectively UNSUPPORTED for slot-correct multi-garment output. Identity:
+UNKNOWN (face adapters exist; full-body try-on identity unvalidated).
+Colors: LIKELY_BUT_UNPROVEN. Patterns/logos: WEAK (no spatial transfer).
+Framing/background/1024×1536: normalizable mechanics, quality UNKNOWN.
+
+## Sequential-edit risks (why C is not a fallback)
+
+Identity drift per pass, previous-garment overwrite inside repaint masks,
+cumulative artifacts, logo degradation, pose/anatomy drift, N× latency
+(minutes × garments on this CPU). No source demonstrates sequential outfit
+try-on with these components. UNPROVEN, do not assume.
+
+## Decision: NO_LIGHTWEIGHT_PRODUCTION_STACK
+
+Every composable path fails at least one hard gate: visual garment fidelity
+(no spatial garment transfer in any commercial-safe adapter checked),
+license completeness (OpenCLIP/control/OpenPose weight terms), or CPU
+practicality (diffusion steps × CFG on 2 vCPU). No Phase C6 target exists.
+
+## Minimum constraint change (product decision, unchanged from C3)
+
+GPU capacity first (unlocks commercial-safe editors, contract gaps remain),
+a commercial multi-ref VTON license (FastFit-class via LavieAI), or an
+explicitly rescoped non-generative compositing product (not a provider
+substitute). Deterministic 2D overlay remains a product-scope alternative
+only — never classified as meeting the photographic contract.
+
 ## Minimum constraint change to unblock (pick one, product decision)
 
 1. Obtain a commercial license for FastFit-class multi-reference VTON
