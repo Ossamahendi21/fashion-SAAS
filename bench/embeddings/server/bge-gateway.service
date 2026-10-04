@@ -1,0 +1,30 @@
+[Unit]
+Description=Local BGE embedding gateway (Step 7 Phase C, CPU only, $0 provider cost)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bge
+Group=bge
+WorkingDirectory=/opt/fashion-bge-gateway/gateway
+ExecStart=/opt/fashion-bge-gateway/venv/bin/python /opt/fashion-bge-gateway/gateway/bge_gateway.py
+# Port 18090: 127.0.0.1:8080 is owned by temporal-ui and 18080 by the extraction gateway.
+Environment=PORT=18090
+Environment=HF_HUB_OFFLINE=1
+# Pinned snapshot (immutable revision; matches install.sh or the service fails closed offline).
+Environment=BGE_MODEL_PATH=/opt/fashion-bge-gateway/models/5c38ec7c405ec4b44b94cc5a9bb96e735b38267a
+Environment=HOME=/opt/fashion-bge-gateway
+EnvironmentFile=/etc/bge-gateway.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/fashion-bge-gateway
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
