@@ -22,7 +22,14 @@ import {
 } from "./shared/validators";
 import { LIVE_MIRROR_DAILY_AUTHORIZED_SECONDS_KEY } from "./shared/credits";
 
+/** Legacy OpenAI `text-embedding-3-small` width. Kept for the historical vectors and `by_embedding`. */
 export const EMBEDDING_DIMENSIONS = 1536;
+
+/**
+ * Local `BAAI/bge-small-en-v1.5` width (Step 7 Phase B1: 384 dims, CLS pooling, L2-normalised once).
+ * Matches `EMBEDDING_MODELS.local.dimensions` in `ai/embedding.ts`; never configurable at runtime.
+ */
+export const EMBEDDING_BGE_DIMENSIONS = 384;
 
 export default defineSchema({
   users: defineTable({
@@ -128,16 +135,36 @@ export default defineSchema({
     .index("by_createdAt", ["createdAt"])
     .searchIndex("search_text", { searchField: "searchText", filterFields: ["userId"] }),
 
-  /** Embeddings live apart from items so wardrobe reads stay small (a 1536-float vector is ~12 KB per item). */
+  /**
+   * Embeddings live apart from items so wardrobe reads stay small (a 1536-float vector is ~12 KB per item).
+   *
+   * Step 7 Phase C migration (additive, Option C — same table, second field):
+   *   - `embedding` / `by_embedding` are the LEGACY OpenAI space. Existing vectors and the index
+   *     are untouched; nothing in the new path reads or writes them.
+   *   - `embeddingBge` / `by_embeddingBge` are the local BGE space every new write targets. During the
+   *     migration window a row may carry only `embeddingBge`, which is why `embedding` became
+   *     optional: dual-writing OpenAI alongside it would cost money, and $0 spend is the requirement.
+   *     This is the accepted temporary state — legacy similarity readers cannot see items ingested
+   *     after the cutover until they switch to `by_embeddingBge` (cutover step G).
+   *   - Neither index is redefined in place and no legacy vector is overwritten.
+   */
   itemEmbeddings: defineTable({
     itemId: v.id("items"),
     userId: v.id("users"),
-    embedding: v.array(v.float64()),
+    /** Legacy 1536-d OpenAI vector. Absent on rows written by the local-BGE path. */
+    embedding: v.optional(v.array(v.float64())),
+    /** Local 384-d BGE vector. Absent until this item is embedded (or backfilled). */
+    embeddingBge: v.optional(v.array(v.float64())),
   })
     .index("by_item", ["itemId"])
     .vectorIndex("by_embedding", {
       vectorField: "embedding",
       dimensions: EMBEDDING_DIMENSIONS,
+      filterFields: ["userId"],
+    })
+    .vectorIndex("by_embeddingBge", {
+      vectorField: "embeddingBge",
+      dimensions: EMBEDDING_BGE_DIMENSIONS,
       filterFields: ["userId"],
     }),
 

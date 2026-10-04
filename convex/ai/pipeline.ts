@@ -9,7 +9,7 @@ import {
   markItemFailed,
   markItemReady,
   readyItemsForEmbeddings,
-  setItemEmbedding,
+  setItemEmbeddingBge,
 } from "../model/items";
 import { addSteps, appendResult, getJob, setStep } from "../model/jobs";
 import { layeredItems } from "../model/outfits";
@@ -320,14 +320,26 @@ export const extractContext = internalQuery({
   },
 });
 
-/** Maps vector-search hits on `itemEmbeddings` back to items usable as a duplicate target. */
+/**
+ * LEGACY / reference only (Step 7 Phase C). This existed so the cosine-threshold duplicate chain in
+ * `ai/openai.ts` could resolve its vector hits to a duplicate target; that chain is retired, so
+ * nothing calls this any more. It is kept, unused, alongside `readyItemsForEmbeddings` and the legacy
+ * `setItemEmbedding` as the rollback path — delete all three together in the later cleanup phase.
+ */
 export const duplicateCandidates = internalQuery({
   args: { embeddingIds: v.array(v.id("itemEmbeddings")), itemId: v.id("items") },
   returns: v.array(v.id("items")),
   handler: async (ctx, args): Promise<Id<"items">[]> => readyItemsForEmbeddings(ctx, args.embeddingIds, args.itemId),
 });
 
-/** One transaction for a finished cutout: file, swatches, usage, embedding, duplicate flag, step. */
+/**
+ * One transaction for a finished cutout: file, swatches, usage, the local BGE vector and the step.
+ *
+ * Step 7 Phase C: the argument is `embeddingBge` (384-d, asserted by `setItemEmbeddingBge`), and the
+ * `duplicateOfId` argument is GONE — this is where the old cosine-threshold duplicate assignment used
+ * to land, and the product decision retires it. A re-ingested item therefore keeps whatever
+ * `duplicateOfId` it already had (undefined for new items, untouched for legacy ones).
+ */
 export const itemReady = internalMutation({
   args: {
     itemId: v.id("items"),
@@ -338,8 +350,7 @@ export const itemReady = internalMutation({
     usage: v.optional(vTokenUsage),
     /** Provider-specific COGS for providers without SDK token accounting (self-hosted withoutBG). */
     costUsd: v.optional(v.number()),
-    embedding: v.array(v.float64()),
-    duplicateOfId: v.optional(v.id("items")),
+    embeddingBge: v.array(v.float64()),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
@@ -349,7 +360,7 @@ export const itemReady = internalMutation({
       usage: args.usage,
       costUsd: args.costUsd,
     });
-    await setItemEmbedding(ctx, args.itemId, args.embedding, args.duplicateOfId);
+    await setItemEmbeddingBge(ctx, args.itemId, args.embeddingBge);
     await appendResult(ctx, args.jobId, args.itemId);
     await setStep(ctx, args.jobId, args.stepKey, {
       status: "done",

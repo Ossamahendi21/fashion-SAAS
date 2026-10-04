@@ -32,6 +32,31 @@ export const SERVER_ENV_KEYS = [
   "FLORENCESAM_API_KEY",
   /** Which provider renders try-on images: "openai" (default, gpt-image-2). Server-only. */
   "RENDER_PROVIDER",
+  /**
+   * Which provider embeds item text: "local" (self-hosted BAAI/bge-small-en-v1.5, $0) or "openai"
+   * (legacy text-embedding-3-small reference/rollback only, never an automatic fallback). NO
+   * default: missing/empty/unsupported fails closed before any runner executes, so a deployment can
+   * neither silently spend on OpenAI nor silently depend on an undeployed gateway. Server-only: read
+   * in `convex/ai/embedding.ts`, never exposed to the client.
+   */
+  "EMBEDDING_PROVIDER",
+  /**
+   * Which stored vector generation shopping similarity reads: "legacy" (stored OpenAI vectors,
+   * `by_embedding` — the TEMPORARY migration default, so existing users keep existing behavior) or
+   * "bge" (local BGE vectors, `by_embeddingBge` — set explicitly after backfill validation). This
+   * only selects stored vectors/indexes and can never cause an OpenAI API call. Server-only.
+   */
+  "EMBEDDING_READ_GENERATION",
+  /** Server-only self-hosted BGE gateway base URL (never NEXT_PUBLIC_). */
+  "EMBEDDING_BASE_URL",
+  /** Server-only private gateway key the BGE gateway expects in X-API-Key (never NEXT_PUBLIC_, never logged). */
+  "EMBEDDING_API_KEY",
+  /**
+   * Dedicated service key guarding the `embeddingBackfill` action. Deliberately NOT the stylist
+   * `AGENT_SERVICE_KEY`: the backfill writes vectors to every user's wardrobe and must not be
+   * reachable with agent credentials.
+   */
+  "EMBEDDING_BACKFILL_KEY",
 ] as const;
 
 export type ServerEnvKey = (typeof SERVER_ENV_KEYS)[number];

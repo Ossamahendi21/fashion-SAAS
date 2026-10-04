@@ -10,22 +10,23 @@ import {
   coerceAdviceText,
   computeAdviceBase,
   consumeAdviceTurn as consumeTurnDocs,
+  embeddingReadGeneration,
+  type EmbeddingReadGeneration,
   getCandidateVector,
   listOwnedReady,
   MIN_OWNED_FOR_ADVICE,
   outfitDisplay,
   readCachedAdvice,
+  readGenerationConfig,
   recordAdviceCogs,
   requireAdviceCandidate,
   resolveCachedSummaries,
   resolveSimilarOwned,
   SMALL_WARDROBE_NOTE,
   stableSimilarEntries,
-  VECTOR_SEARCH_LIMIT,
   writeCachedAdvice,
 } from "./model/shoppingAdvice";
 import { toItemSummary } from "./model/outfits";
-import { LIMITS } from "./shared/credits";
 import {
   vAdviceLabel,
   vAdviceSignalType,
@@ -106,7 +107,12 @@ const vCandidateFacts = v.object({
  * Throws UNAUTHENTICATED / NOT_FOUND / INVALID_INPUT exactly like the model contract.
  */
 export const adviceContext = internalQuery({
-  args: { clerkId: v.string(), itemId: v.id("items") },
+  args: {
+    clerkId: v.string(),
+    itemId: v.id("items"),
+    /** Active read generation; omitted means the env default (legacy during migration). */
+    readGeneration: v.optional(v.union(v.literal("legacy"), v.literal("bge"))),
+  },
   returns: v.object({
     candidate: v.object({ itemId: v.id("items"), name: v.string() }),
     candidateFacts: vCandidateFacts,
@@ -131,15 +137,16 @@ export const adviceContext = internalQuery({
     baseSignalMessages: v.array(v.string()),
     baseLabel: vAdviceLabel,
   }),
-  handler: async (ctx, { clerkId, itemId }) => {
+  handler: async (ctx, { clerkId, itemId, readGeneration }) => {
     const user = await getByClerkId(ctx, clerkId);
     if (!user) throw appError("UNAUTHENTICATED", "Your account is still being set up. Try again in a moment.");
     const candidate = await requireAdviceCandidate(ctx, user, itemId);
     const owned = await listOwnedReady(ctx, user._id);
+    const generation: EmbeddingReadGeneration = readGeneration ?? embeddingReadGeneration();
     const base = computeAdviceBase(candidate, owned);
-    const { signals: baseSignals, label: baseLabel } = buildSignals(candidate, owned, [], base.matchCount, base.estimatedCombinations);
+    const { signals: baseSignals, label: baseLabel } = buildSignals(candidate, owned, [], base.matchCount, base.estimatedCombinations, generation);
     const smallWardrobe = owned.length < MIN_OWNED_FOR_ADVICE;
-    const fingerprint = adviceFingerprint(candidate, owned, user.prefs);
+    const fingerprint = adviceFingerprint(candidate, owned, user.prefs, generation);
     const cached = await readCachedAdvice(ctx, user._id, candidate._id);
     const matching = [];
     for (const id of base.matchingIds) {
@@ -159,7 +166,7 @@ export const adviceContext = internalQuery({
         season: [...candidate.season],
         formality: candidate.formality,
       },
-      candidateVector: await getCandidateVector(ctx, candidate._id),
+      candidateVector: await getCandidateVector(ctx, candidate._id, generation),
       ownerId: user._id,
       matching,
       matchingIds: base.matchingIds,
@@ -189,6 +196,8 @@ export const adviceSimilar = internalQuery({
     clerkId: v.string(),
     itemId: v.id("items"),
     hits: v.array(v.object({ embeddingId: v.id("itemEmbeddings"), score: v.number() })),
+    /** Must match the generation the action searched with; omitted means the env default. */
+    readGeneration: v.optional(v.union(v.literal("legacy"), v.literal("bge"))),
   },
   returns: v.object({
     similar: v.array(vAdviceSimilarItem),
@@ -197,14 +206,15 @@ export const adviceSimilar = internalQuery({
     signalMessages: v.array(v.string()),
     label: vAdviceLabel,
   }),
-  handler: async (ctx, { clerkId, itemId, hits }) => {
+  handler: async (ctx, { clerkId, itemId, hits, readGeneration }) => {
     const user = await getByClerkId(ctx, clerkId);
     if (!user) throw appError("UNAUTHENTICATED", "Your account is still being set up. Try again in a moment.");
     const candidate = await requireAdviceCandidate(ctx, user, itemId);
     const owned = await listOwnedReady(ctx, user._id);
-    const similar = await resolveSimilarOwned(ctx, user, candidate, hits);
+    const generation: EmbeddingReadGeneration = readGeneration ?? embeddingReadGeneration();
+    const similar = await resolveSimilarOwned(ctx, user, candidate, hits, generation);
     const base = computeAdviceBase(candidate, owned);
-    const { signals, label } = buildSignals(candidate, owned, similar, base.matchCount, base.estimatedCombinations);
+    const { signals, label } = buildSignals(candidate, owned, similar, base.matchCount, base.estimatedCombinations, generation);
     const viewed = [];
     for (const entry of similar) {
       const summary = await toItemSummary(ctx, entry.item);
@@ -342,9 +352,14 @@ export const analyze = action({
   handler: async (ctx, { itemId }): Promise<Infer<typeof vShoppingAdvice>> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw appError("UNAUTHENTICATED", "Sign in to continue.");
+    // The read generation is resolved BEFORE any vector work: an unsupported value fails here and
+    // no vector search ever runs. This only selects stored vectors/indexes — it cannot bill anything.
+    const generation = embeddingReadGeneration();
+    const reader = readGenerationConfig(generation);
     const context = await ctx.runQuery(internal.shoppingAdvice.adviceContext, {
       clerkId: identity.subject,
       itemId,
+      readGeneration: generation,
     });
     if (context.cacheHit) {
       const view = await ctx.runQuery(internal.shoppingAdvice.adviceView, {
@@ -353,24 +368,27 @@ export const analyze = action({
       });
       return { ...view, cached: true };
     }
-    // Similarity resolves in the action: the candidate's embedding row seeds one
-    // user-scoped vector search, and a query maps the hits back to owned ready items.
-    // No vector, no similarity — the rest of the analysis still stands on its own.
+    // Similarity resolves in the action: the candidate's stored vector seeds one user-scoped
+    // vector search over the ACTIVE generation's static index (legacy `by_embedding`, pool 8, cosine
+    // order — or BGE `by_embeddingBge`, pool 16, same-category-first rerank). No stored vector for
+    // that generation, no similarity — the rest of the analysis still stands on its own. The two
+    // vector spaces are never mixed and neither path makes a network call.
     let similar: SimilarView[] = [];
     let stableSimilar: Array<Omit<SimilarView, "url">> = [];
     let signals: SignalView[] = context.baseSignals;
     let signalMessages: string[] = context.baseSignalMessages;
     let label: AdviceLabel = context.baseLabel;
     if (context.candidateVector) {
-      const hits = await ctx.vectorSearch("itemEmbeddings", "by_embedding", {
+      const hits = await ctx.vectorSearch("itemEmbeddings", reader.indexName, {
         vector: context.candidateVector,
-        limit: VECTOR_SEARCH_LIMIT,
+        limit: reader.searchLimit,
         filter: (q) => q.eq("userId", context.ownerId),
       });
       const resolved = await ctx.runQuery(internal.shoppingAdvice.adviceSimilar, {
         clerkId: identity.subject,
         itemId,
         hits: hits.map((hit) => ({ embeddingId: hit._id, score: hit._score })),
+        readGeneration: generation,
       });
       similar = resolved.similar;
       stableSimilar = resolved.stableSimilar;
@@ -401,7 +419,7 @@ export const analyze = action({
         name: entry.name,
         category: entry.category,
         band:
-          entry.duplicate || entry.similarity >= LIMITS.duplicateCosineThreshold
+          entry.duplicate || entry.similarity >= reader.proseThreshold
             ? ("very similar" as const)
             : ("similar" as const),
       })),

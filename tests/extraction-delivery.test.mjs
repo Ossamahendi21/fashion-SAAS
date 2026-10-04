@@ -211,8 +211,7 @@ test("itemReady with a provider cost (withoutbg) records COGS without faking tok
     storageId: "cutout-new",
     hex: ["#123456", "#8899aa"],
     costUsd: 0.002,
-    embedding: [0.1, 0.2, 0.3],
-    duplicateOfId: undefined,
+    embeddingBge: new Array(384).fill(0).map((_, index) => (index === 0 ? 1 : 0)),
   });
   const item = await f.db.get("item1");
   assert.equal(item.storageId, "cutout-new");
@@ -226,9 +225,14 @@ test("itemReady with a provider cost (withoutbg) records COGS without faking tok
   assert.equal(job.steps[0].meta.itemId, "item1");
   assert.equal(job.steps[0].meta.costUsd, 0.002);
   assert.equal(f.tableRows("creditLedger").length, 0, "extraction settlement never touches the credit ledger");
+  const [embeddingRow] = f.tableRows("itemEmbeddings");
+  assert.equal(embeddingRow.itemId, "item1");
+  assert.equal(embeddingRow.embeddingBge.length, 384);
+  assert.equal("embedding" in embeddingRow, false, "no legacy OpenAI vector is dual-written");
+  assert.equal(item.duplicateOfId, undefined, "no cosine threshold assigns a duplicate");
 });
 
-test("itemReady with token usage (the openai default) keeps the existing usage-to-COGS accounting", async () => {
+test("itemReady with token usage keeps the existing usage-to-COGS accounting", async () => {
   const f = dbFixture();
   f.seedItem();
   f.seedJob();
@@ -239,8 +243,7 @@ test("itemReady with token usage (the openai default) keeps the existing usage-t
     storageId: "cutout-new",
     hex: ["#123456"],
     usage: SOME_USAGE,
-    embedding: [0.1, 0.2, 0.3],
-    duplicateOfId: undefined,
+    embeddingBge: new Array(384).fill(0).map((_, index) => (index === 0 ? 1 : 0)),
   });
   const expected = usageToUsd(SOME_USAGE);
   const item = await f.db.get("item1");
@@ -347,8 +350,7 @@ test("itemReady with the free provider records $0 COGS without faking token usag
     storageId: "cutout-new",
     hex: ["#123456"],
     costUsd: 0,
-    embedding: [0.1, 0.2, 0.3],
-    duplicateOfId: undefined,
+    embeddingBge: new Array(384).fill(0).map((_, index) => (index === 0 ? 1 : 0)),
   });
   const item = await f.db.get("item1");
   assert.equal(item.status, "ready");

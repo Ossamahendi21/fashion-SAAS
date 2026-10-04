@@ -82,7 +82,18 @@ export const LIMITS = {
   lowBalanceThreshold: 10,
   detectCallsPerDay: 200,
   stylistMessagesPerDay: 100,
+  /**
+   * LEGACY text-cosine duplicate threshold, retained only for reference/rollback behaviour on the
+   * old 1536-d OpenAI space. Step 7 Phase C retired automatic duplicate flagging: no cosine threshold
+   * writes `duplicateOfId` any more, so nothing new reads this.
+   */
   duplicateCosineThreshold: 0.92,
+  /**
+   * Step 7 Phase B2 (frozen pairs, 86 labelled): the highest-recall BGE cosine with ZERO false
+   * positives (TP 41, FP 0, FN 7 → precision 1.0, recall 0.854). Semantic prose only — it decides
+   * whether advice may say "Very similar to your X". It must never be used to assign `duplicateOfId`.
+   */
+  strongSimilarityThreshold: 0.896396,
   /** Wardrobe size ceiling; keeps items.list well inside Convex's per-query read limits. */
   maxItemsPerUser: 1500,
 } as const;

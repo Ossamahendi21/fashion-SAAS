@@ -3,6 +3,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { assertOwner } from "../lib/auth";
 import { appError } from "../lib/errors";
+import { EMBEDDING_BGE_DIMENSIONS } from "../schema";
 import { LIMITS, usageToUsd, type TokenUsage } from "../shared/credits";
 import { vItemAttributes } from "../shared/validators";
 import { CATEGORY_LABELS, ITEM_STATUSES, type Category } from "../shared/wardrobe";
@@ -205,7 +206,15 @@ export async function markItemOwned(ctx: MutationCtx, user: Doc<"users">, itemId
   return true;
 }
 
-/** Embeddings live in their own table (`by_item`), one row per item; writing twice replaces the row. */
+/**
+ * LEGACY OpenAI embedding writer (1536-d). Retained unchanged as the rollback/reference path for the
+ * historical vector space. Production ingest no longer calls it: Step 7 Phase C embeds through
+ * `setItemEmbeddingBge` and writes no OpenAI vector, because dual-writing would cost money.
+ *
+ * Note the `duplicateOfId` parameter below. It is the OLD cosine-threshold duplicate assignment, and
+ * it is kept only so a rollback to the legacy path stays byte-for-byte reproducible. The current
+ * product decision is that no text embedding assigns `duplicateOfId` (see `setItemEmbeddingBge`).
+ */
 export async function setItemEmbedding(
   ctx: MutationCtx,
   itemId: Id<"items">,
@@ -221,6 +230,39 @@ export async function setItemEmbedding(
   if (existing) await ctx.db.patch(existing._id, { embedding, userId: item.userId });
   else await ctx.db.insert("itemEmbeddings", { itemId, userId: item.userId, embedding });
   await ctx.db.patch(itemId, { duplicateOfId, updatedAt: Date.now() });
+}
+
+/**
+ * The Step 7 Phase C writer: one 384-d local BGE vector, nothing else.
+ *
+ * Deliberately separate from `setItemEmbedding` because that function mutates `duplicateOfId` from a
+ * cosine threshold. This one:
+ *   - asserts the width before touching the database, so a wrong-width vector can never land in
+ *     `by_embeddingBge`;
+ *   - patches `embeddingBge` only. It never writes the legacy `embedding`, so legacy vectors and
+ *     `by_embedding` stay exactly as they are and the rollback path keeps working;
+ *   - never reads or writes `duplicateOfId`. Existing user-dismissed and legacy flags are left alone,
+ *     and a newly ingested item keeps `duplicateOfId` undefined by construction;
+ *   - is idempotent: re-running it replaces the same field with the same vector.
+ */
+export async function setItemEmbeddingBge(
+  ctx: MutationCtx,
+  itemId: Id<"items">,
+  embeddingBge: number[],
+): Promise<void> {
+  if (embeddingBge.length !== EMBEDDING_BGE_DIMENSIONS) {
+    throw new Error(
+      `Refusing to write a ${embeddingBge.length}-dimension vector to embeddingBge; expected exactly ${EMBEDDING_BGE_DIMENSIONS}.`,
+    );
+  }
+  const item = await ctx.db.get(itemId);
+  if (!item) return;
+  const existing = await ctx.db
+    .query("itemEmbeddings")
+    .withIndex("by_item", (q) => q.eq("itemId", itemId))
+    .unique();
+  if (existing) await ctx.db.patch(existing._id, { embeddingBge, userId: item.userId });
+  else await ctx.db.insert("itemEmbeddings", { itemId, userId: item.userId, embeddingBge });
 }
 
 export async function deleteItemEmbedding(ctx: MutationCtx, itemId: Id<"items">): Promise<void> {

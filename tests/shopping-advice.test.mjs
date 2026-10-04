@@ -113,7 +113,7 @@ function fixture() {
   put("items", "small-candidate", baseItem({ name: "Small Candidate", userId: "smallu", ownership: "considering" }));
   put("items", "small-tee", baseItem({ name: "Small Tee", userId: "smallu", ownership: "owned" }));
   put("items", "small-jeans", baseItem({ name: "Small Jeans", category: "bottom", userId: "smallu", ownership: "owned" }));
-  const emb = (id, itemId, userId = "owner") => put("itemEmbeddings", id, { itemId, userId, embedding: [0.1, 0.2] });
+  const emb = (id, itemId, userId = "owner") => put("itemEmbeddings", id, { itemId, userId, embedding: [0.1, 0.2], embeddingBge: [0.1, 0.2] });
   emb("emb-candidate", "candidate-jacket");
   emb("emb-dupe", "candidate-dupe");
   emb("emb-tee", "owned-tee");
@@ -332,18 +332,26 @@ test("10: strongest matches are bounded", async () => {
   const f = fixture();
   const owner = await f.db.get("owner");
   const candidate = await f.db.get("candidate-jacket");
-  const similar = await adviceModel.resolveSimilarOwned(f.context(), owner, candidate, [
+  const hits = [
     hit("emb-tee", 0.99),
     hit("emb-tee2", 0.98),
     hit("emb-jeans", 0.97),
     hit("emb-trainers", 0.96),
     hit("emb-boots", 0.95),
     hit("emb-coat", 0.94),
-  ]);
-  assert.equal(similar.length, 3);
+  ];
+  const cutover = await adviceModel.resolveSimilarOwned(f.context(), owner, candidate, hits, "bge");
+  assert.equal(cutover.length, 3);
   assert.deepEqual(
-    similar.map((entry) => entry.item._id),
+    cutover.map((entry) => entry.item._id),
+    ["owned-coat", "owned-tee", "owned-tee2"],
+    "bge: same-category-first, then cosine order",
+  );
+  const legacy = await adviceModel.resolveSimilarOwned(f.context(), owner, candidate, hits, "legacy");
+  assert.deepEqual(
+    legacy.map((entry) => entry.item._id),
     ["owned-tee", "owned-tee2", "owned-jeans"],
+    "legacy: pre-Phase-C cosine order preserved",
   );
 });
 
@@ -698,7 +706,9 @@ test("L5: repeated markOwned remains safe", async () => {
 test("L6: markOwned performs no AI or provider call", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync(fileURLToPath(new URL("../convex/model/items.ts", import.meta.url)), "utf8");
-  const body = source.slice(source.indexOf("export async function markItemOwned"), source.indexOf("/** Embeddings live"));
+  const match = source.match(/export async function markItemOwned[\s\S]*?\r?\n}\r?\n/);
+  assert.ok(match, "markItemOwned body found");
+  const body = match[0];
   for (const forbidden of ["runAction", "openai", "decart", "setItemEmbedding", "embedText", "vectorSearch", "reserve(", "bumpDailyStats", "bumpUsageCounter"]) {
     assert.ok(!body.includes(forbidden), `markItemOwned must not reference ${forbidden}`);
   }

@@ -2,6 +2,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import { appError } from "../lib/errors";
 import { detectUsageToUsd, LIMITS } from "../shared/credits";
+import { EMBEDDING_GENERATION, LEGACY_EMBEDDING_GENERATION } from "../shared/embeddingText";
 import {
   ADVICE_LABELS,
   type AdviceLabel,
@@ -31,8 +32,98 @@ export const MAX_SIMILAR_ITEMS = 3;
 export const MAX_MATCHING_ITEMS = 8;
 /** Fewer owned ready items than this and there is no wardrobe to judge fit against. */
 export const MIN_OWNED_FOR_ADVICE = 3;
-/** Vector hits scanned per analysis; mapped down to owned ready items only. */
-export const VECTOR_SEARCH_LIMIT = 8;
+/**
+ * Which stored vector generation shopping similarity reads. This is NOT a model provider: it only
+ * selects stored vectors and a static index, so it can never cause an OpenAI API call.
+ *
+ * - "legacy": the pre-Phase-C behavior — `embedding` / `by_embedding`, pool 8, no rerank, the
+ *   legacy 0.92 prose threshold. TEMPORARY migration default: existing users keep their existing
+ *   similarity until the backfill is proven, then operators set `EMBEDDING_READ_GENERATION=bge`.
+ * - "bge": local BGE — `embeddingBge` / `by_embeddingBge`, pool 16, same-category-first stable
+ *   rerank, the B2 0.896396 prose threshold.
+ */
+export const READ_GENERATIONS = ["legacy", "bge"] as const;
+export type EmbeddingReadGeneration = (typeof READ_GENERATIONS)[number];
+
+/**
+ * Resolves the read generation. Missing/empty means "legacy": during migration existing users keep
+ * existing behavior, and a fresh deployment cannot silently depend on an unproven backfill.
+ * Unsupported values fail closed before any vector work happens.
+ */
+export function embeddingReadGeneration(
+  env: Record<string, string | undefined> = process.env,
+): EmbeddingReadGeneration {
+  const generation = env.EMBEDDING_READ_GENERATION;
+  if (generation === undefined || generation === "") return "legacy";
+  if (generation === "legacy" || generation === "bge") return generation;
+  throw appError(
+    "INVALID_INPUT",
+    `EMBEDDING_READ_GENERATION "${generation}" is not supported; set it to "legacy" (stored OpenAI vectors) or "bge" (local BGE vectors).`,
+  );
+}
+
+type ReadGenerationConfig = {
+  /** Which stored field seeds the search. */
+  vectorField: "embedding" | "embeddingBge";
+  /** Static index for that field. Never taken from env. */
+  indexName: "by_embedding" | "by_embeddingBge";
+  /** Candidate pool mapped down to owned ready items. */
+  searchLimit: number;
+  /** BGE-only: same-category-first stable rerank before bounding. */
+  rerank: boolean;
+  /** Prose threshold: legacy 0.92 geometry vs B2 0.896396 BGE geometry. Never a duplicate gate. */
+  proseThreshold: number;
+  /** Fingerprint token so switching generations invalidates cached advice. */
+  generationToken: string;
+};
+
+/**
+ * The static per-generation reader contract. Index names and dimensions live here and in
+ * `schema.ts`, never in env — the selector only picks a key.
+ */
+export function readGenerationConfig(generation: EmbeddingReadGeneration): ReadGenerationConfig {
+  if (generation === "bge") {
+    return {
+      vectorField: "embeddingBge",
+      indexName: "by_embeddingBge",
+      searchLimit: VECTOR_SEARCH_LIMIT,
+      rerank: true,
+      proseThreshold: LIMITS.strongSimilarityThreshold,
+      generationToken: EMBEDDING_GENERATION,
+    };
+  }
+  if (generation === "legacy") {
+    return {
+      vectorField: "embedding",
+      indexName: "by_embedding",
+      searchLimit: LEGACY_VECTOR_SEARCH_LIMIT,
+      rerank: false,
+      proseThreshold: LIMITS.duplicateCosineThreshold,
+      generationToken: LEGACY_EMBEDDING_GENERATION,
+    };
+  }
+  // Unreachable through the typed selector, but a second fail-closed gate so no caller can ever
+  // land on the wrong generation by passing something the type system did not see.
+  throw appError(
+    "INVALID_INPUT",
+    `Unknown embedding read generation "${generation}"; expected "legacy" or "bge".`,
+  );
+}
+/**
+ * Vector hits scanned per BGE analysis, mapped down to owned ready items only.
+ *
+ * Step 7 Phase B2 (frozen 16-item corpus, raw cosine order): a pool of 8 already found every
+ * expected neighbour, and pools 16 and 32 were identical to it — so 8 is the smallest safe pool.
+ * 16 is used in production because a user's real wardrobe is far larger than the fixture corpus, and
+ * the extra candidates cost one filtered index read. The rerank below takes the best 3 of whatever
+ * comes back, so a wider pool can only help ranking quality.
+ */
+export const VECTOR_SEARCH_LIMIT = 16;
+/**
+ * The pre-Phase-C pool for legacy reads. Preserved exactly so `EMBEDDING_READ_GENERATION=legacy`
+ * reproduces the behavior users had before migration.
+ */
+export const LEGACY_VECTOR_SEARCH_LIMIT = 8;
 /** Outfit-combination display cap: estimates never pretend to count real outfits exactly. */
 export const OUTFIT_COMBO_CAP = 25;
 /** Per-group cap inside the combination product, so one deep slot cannot explode the estimate. */
@@ -142,32 +233,64 @@ export async function listOwnedReady(ctx: Ctx, userId: Id<"users">): Promise<Doc
 }
 
 /**
- * The candidate's embedding vector for similarity search, or null when it was never
- * embedded. Query-safe: the actual vector search runs in the action (Convex 1.45
- * exposes `vectorSearch` on actions only), and hit mapping stays in queries.
+ * The candidate's stored vector for similarity search, or null when that generation was never
+ * written. Reads exactly one generation's field — never mixes vector spaces: a BGE-only row under
+ * legacy reads (or a not-yet-backfilled row under BGE reads) simply gets no similarity.
  */
 export async function getCandidateVector(
   ctx: Ctx,
   candidateId: Id<"items">,
+  generation: EmbeddingReadGeneration = embeddingReadGeneration(),
 ): Promise<number[] | null> {
   const row = await ctx.db
     .query("itemEmbeddings")
     .withIndex("by_item", (q) => q.eq("itemId", candidateId))
     .unique();
-  return row && Array.isArray(row.embedding) && row.embedding.length > 0 ? [...row.embedding] : null;
+  const field = readGenerationConfig(generation).vectorField;
+  const vector = row?.[field];
+  return row && Array.isArray(vector) && vector.length > 0 ? [...vector] : null;
+}
+
+/**
+ * Stable same-category-first rerank (Step 7 Phase B2).
+ *
+ * The candidate pool arrives in cosine order, but cosine alone puts a cross-category near-neighbour
+ * ahead of a same-category one often enough to be wrong ("you own a similar coat" for a dress).
+ * Measured on the frozen corpus with the BGE vectors: same-category-first lifted top-3 expected
+ * recall from 23/27 to 25/27 and cut bad top-3 results from 7 to 5, at pool 8/16/32 alike.
+ *
+ * Two rules, no per-category heuristics:
+ *   1. entries whose category equals the candidate's lead, the rest follow;
+ *   2. inside each partition the incoming cosine order is preserved exactly (stable partition).
+ * Input order is therefore the only tiebreak, so the result is deterministic for a given pool.
+ */
+export function rerankSimilarByCategory<T extends { item: { category: Category } }>(
+  candidateCategory: Category,
+  entries: T[],
+): T[] {
+  const sameCategory: T[] = [];
+  const otherCategories: T[] = [];
+  for (const entry of entries) {
+    if (entry.item.category === candidateCategory) sameCategory.push(entry);
+    else otherCategories.push(entry);
+  }
+  return [...sameCategory, ...otherCategories];
 }
 
 /**
  * Maps vector-search hits back to the strongest similar OWNED ready items. Hits resolve
  * through the embedding rows (never trusted directly): foreign rows, unready items,
  * considering rows and the candidate itself are all dropped. A duplicateOfId already
- * pointing at an owned ready item leads the list as a certain match. Bounded to a few.
+ * pointing at an owned ready item leads the list as a certain match — that flag is now
+ * legacy/user-set only, since no text embedding assigns it. The remaining cosine hits are
+ * reranked same-category-first, then bounded to a few.
  */
 export async function resolveSimilarOwned(
   ctx: Ctx,
   user: Doc<"users">,
   candidate: Doc<"items">,
   hits: Array<{ embeddingId: Id<"itemEmbeddings">; score: number }>,
+  generation: EmbeddingReadGeneration = embeddingReadGeneration(),
 ): Promise<SimilarOwned[]> {
   const found: SimilarOwned[] = [];
   if (candidate.duplicateOfId) {
@@ -182,13 +305,24 @@ export async function resolveSimilarOwned(
       found.push({ item: dup, similarity: 1, duplicate: true });
     }
   }
+  // Collect the whole surviving pool first, then rerank: truncating to MAX_SIMILAR_ITEMS before the
+  // rerank would let a low-cosine same-category item lose its slot to a cross-category neighbour.
+  // The same-category-first rerank is BGE-only: legacy reads reproduce the pre-Phase-C cosine order.
+  const cosineOrdered: SimilarOwned[] = [];
   for (const hit of hits) {
     const embedding = await ctx.db.get(hit.embeddingId);
     if (!embedding || embedding.userId !== user._id || embedding.itemId === candidate._id) continue;
     const item = await ctx.db.get(embedding.itemId);
     if (!item || item.userId !== user._id || item.status !== "ready" || !isOwnedItem(item)) continue;
     if (found.some((entry) => entry.item._id === item._id)) continue;
-    found.push({ item, similarity: Math.round(hit.score * 100) / 100, duplicate: false });
+    if (cosineOrdered.some((entry) => entry.item._id === item._id)) continue;
+    cosineOrdered.push({ item, similarity: Math.round(hit.score * 100) / 100, duplicate: false });
+  }
+  const reranked = readGenerationConfig(generation).rerank
+    ? rerankSimilarByCategory(candidate.category, cosineOrdered)
+    : cosineOrdered;
+  for (const entry of reranked) {
+    found.push(entry);
     if (found.length >= MAX_SIMILAR_ITEMS) break;
   }
   return found.slice(0, MAX_SIMILAR_ITEMS);
@@ -233,10 +367,15 @@ export function buildSignals(
   similar: SimilarOwned[],
   matchCount: number,
   combos: number,
+  generation: EmbeddingReadGeneration = embeddingReadGeneration(),
 ): { signals: AdviceSignal[]; label: AdviceLabel } {
   const signals: AdviceSignal[] = [];
+  // The prose threshold is the ACTIVE read generation's geometry: legacy 0.92 vs B2 0.896396. It
+  // does not and cannot flag a duplicate: a `duplicate: true` entry means a legacy flag or a user
+  // decision (the one path that may still say "almost exactly"), never a cosine threshold decision.
+  const proseThreshold = readGenerationConfig(generation).proseThreshold;
   const strongSimilar = similar.find(
-    (entry) => entry.duplicate || entry.similarity >= LIMITS.duplicateCosineThreshold,
+    (entry) => entry.duplicate || entry.similarity >= proseThreshold,
   );
   if (strongSimilar) {
     signals.push({
@@ -317,16 +456,22 @@ export function stableSimilarEntries(similar: SimilarOwned[]): AdviceDeterminist
 }
 
 /**
- * Cache fingerprint: the candidate revision plus every owned revision plus the prefs
- * that shape the prose. Any wardrobe, candidate or taste change recomputes. The client
- * never supplies it. Short FNV-1a hex — a fingerprint, not a secret.
+ * Cache fingerprint: the ACTIVE read generation, the candidate revision, every owned revision and
+ * the prefs that shape the prose. Any wardrobe, candidate, taste or generation change recomputes.
+ * The client never supplies it. Short FNV-1a hex — a fingerprint, not a secret.
+ *
+ * The generation token is why switching `EMBEDDING_READ_GENERATION` from legacy to bge makes every
+ * previously cached row a mismatch on first read: no stale prose computed in the other vector space
+ * is ever served.
  */
 export function adviceFingerprint(
   candidate: Doc<"items">,
   owned: Doc<"items">[],
   prefs: Doc<"users">["prefs"],
+  generation: EmbeddingReadGeneration = embeddingReadGeneration(),
 ): string {
   const parts = [
+    readGenerationConfig(generation).generationToken,
     String(candidate.updatedAt),
     prefs.presentation,
     prefs.fit,

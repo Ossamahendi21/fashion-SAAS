@@ -8,12 +8,21 @@ import type { Id } from "../_generated/dataModel";
 import { internalAction, type ActionCtx } from "../_generated/server";
 import { envNumber, optionalEnv, requireEnv } from "../lib/env";
 import { appError, isAppError } from "../lib/errors";
-import { EMBEDDING_DIMENSIONS } from "../schema";
 import { LIMITS, usageToUsd, type TokenUsage } from "../shared/credits";
+import { embeddingText } from "../shared/embeddingText";
 import { INGEST_STEPS } from "../shared/jobs";
 import { vDetectedItem, vRawStylingSuggestion, type RawStylingSuggestion } from "../shared/validators";
 import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
+import {
+  embedText,
+  EMBEDDING_MODELS,
+  localEmbed,
+  localEmbeddingConfig,
+  type EmbedRequest,
+  type EmbedResult,
+  type EmbeddingRunners,
+} from "./embedding";
 import {
   extractGarmentCutout,
   ExtractionError,
@@ -325,9 +334,15 @@ export const summarizeShoppingAdvice = internalAction({
 });
 /**
  * One item: cut it out of its source photo through the extraction seam, store the PNG, read its
- * swatches, embed it and flag it as a duplicate of an existing item when the vectors all but match.
- * The seam dispatches on EXTRACTION_PROVIDER (default florencesam, the free self-hosted path);
- * there is no failover.
+ * swatches and embed it through the embedding seam. The seam dispatches on EXTRACTION_PROVIDER
+ * (default florencesam, the free self-hosted path); there is no failover.
+ *
+ * Step 7 Phase C: the vector comes from the explicit `EMBEDDING_PROVIDER` selection (`local` BGE,
+ * $0) and is written to `embeddingBge`. This action deliberately does NOT search the vector index any more: text
+ * embeddings cannot tell two physical garments apart (Phase B1 duplicate AUC 0.8407, zero-recall at
+ * zero false positives), so the old `vectorSearch → cosine threshold → duplicateOfId` chain is
+ * retired here. A new item keeps `duplicateOfId` undefined; existing flags stay until a user
+ * dismisses them.
  */
 export const extractItem = internalAction({
   args: { itemId: v.id("items"), jobId: v.id("jobs"), stepKey: v.string() },
@@ -355,23 +370,12 @@ export const extractItem = internalAction({
       const storageId = await ctx.storage.store(pngBlob(cutout.bytes));
       const hex = dominantHex(cutout.bytes, 3);
 
-      const embedding = await embedText(embeddingInput(item, hex));
-      const matches = await ctx.vectorSearch("itemEmbeddings", "by_embedding", {
-        vector: embedding,
-        limit: 4,
-        filter: (q) => q.eq("userId", item.userId),
-      });
-      const candidates = matches
-        .filter((match) => match._score >= LIMITS.duplicateCosineThreshold)
-        .map((match) => match._id);
-      const ready =
-        candidates.length > 0
-          ? await ctx.runQuery(internal.ai.pipeline.duplicateCandidates, {
-              embeddingIds: candidates,
-              itemId: args.itemId,
-            })
-          : [];
-      const duplicateOfId = ready[0];
+      // `markItemReady` merges this hex into the item's colours, so building the text here from
+      // `{ ...item.colours, hex }` is the same string the backfill reconstructs from persisted data.
+      const { vector } = await embedText(
+        { text: embeddingText({ ...item, colours: { ...item.colours, hex } }) },
+        embeddingRunners(),
+      );
 
       await ctx.runMutation(internal.ai.pipeline.itemReady, {
         itemId: args.itemId,
@@ -381,8 +385,7 @@ export const extractItem = internalAction({
         hex,
         usage: cutout.usage,
         costUsd: cutout.costUsd,
-        embedding,
-        duplicateOfId,
+        embeddingBge: vector,
       });
       return null;
     } catch (error) {
@@ -632,41 +635,37 @@ async function renderOpenaiImage(request: RenderRequest): Promise<RenderRunnerRe
   return { bytes, usage, costUsd: usageToUsd(usage), latencyMs: Date.now() - started };
 }
 
-async function embedText(input: string): Promise<number[]> {
+/**
+ * The legacy OpenAI embedding branch of the `ai/embedding.ts` seam. It exists so the rollback lever
+ * (`EMBEDDING_PROVIDER=openai`) keeps working against the historical 1536-d vector space and so the
+ * seam's no-fallback contract has a real counterpart to test against. Nothing calls this unless the
+ * operator names `openai` explicitly; there is no automatic fallback to it from a local failure.
+ */
+async function openaiEmbed({ text }: EmbedRequest): Promise<EmbedResult> {
+  const started = Date.now();
   const response = await openai().embeddings.create({
     model: modelId(EMBED_MODEL),
-    input,
-    dimensions: EMBEDDING_DIMENSIONS,
+    input: text,
+    dimensions: EMBEDDING_MODELS.openai.dimensions,
   });
   const vector = response.data[0]?.embedding;
   if (!vector) throw appError("UPSTREAM_FAILED", "Could not embed this item.");
-  return vector;
+  // Explicitly unpriced, matching pre-Phase-C behavior: the legacy path never carried an embedding
+  // COGS line, and `usageToUsd` has NO embedding price in it — its textIn/textOut rates are the
+  // image-model table, while text-embedding-3-small lists at $0.02/M. Pricing prompt_tokens through
+  // it would fabricate a 125x cost. The final production path is local/$0 regardless.
+  return { vector, costUsd: 0, latencyMs: Date.now() - started };
 }
 
-type EmbeddingSource = {
-  name: string;
-  category: string;
-  subcategory: string;
-  material: string;
-  pattern: string;
-  description: string;
-  colours: { primary: string; secondary: string[] };
-};
-
-function embeddingInput(item: EmbeddingSource, hex: string[]): string {
-  return [
-    item.name,
-    item.category,
-    item.subcategory,
-    item.colours.primary,
-    ...item.colours.secondary,
-    ...hex,
-    item.pattern,
-    item.material,
-    item.description,
-  ]
-    .filter((part) => part.length > 0)
-    .join(" · ");
+/**
+ * The two branches of the embedding seam, wired here because this is the file that owns the OpenAI
+ * SDK. `localEmbed` is the production path: one HTTP round trip to the self-hosted gateway, $0.
+ */
+export function embeddingRunners(): EmbeddingRunners {
+  return {
+    openai: openaiEmbed,
+    local: (request) => localEmbed(request, localEmbeddingConfig()),
+  };
 }
 
 /** Core slots the outfit leaves empty, so the prompt can tell the model what to improvise. */
