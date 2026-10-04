@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "note": "Fixed BEFORE any B4 caption was produced. Word-boundary match, longest term first within a family, families checked in priority order. Known risk documented: 'dress shirt' maps to dress.",
+  "priority": ["outerwear", "dress", "shoes", "bag", "headwear", "bottom", "top", "accessory"],
+  "families": {
+    "outerwear": ["overcoat", "jacket", "coat", "blazer", "parka", "cardigan"],
+    "dress": ["one-piece dress", "gown", "dress"],
+    "shoes": ["sneakers", "sneaker", "sandals", "sandal", "heels", "heel", "boots", "boot", "loafer", "loafers", "shoes", "shoe", "footwear"],
+    "bag": ["handbag", "hand bag", "backpack", "tote", "purse", "bag"],
+    "headwear": ["headwear", "beanie", "beanies", "baseball cap", "cap", "hat"],
+    "bottom": ["trousers", "trouser", "pants", "pant", "jeans", "jean", "shorts", "short", "skirt", "leggings", "legging"],
+    "top": ["tank top", "t-shirt", "t shirt", "tee", "shirt", "blouse", "sweater", "hoodie", "hooded", "jersey"],
+    "accessory": ["sunglasses", "sunglass", "necklace", "bracelet", "jewelry", "jewellery", "belt", "scarf", "watch", "earring"]
+  }
+}
