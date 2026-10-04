@@ -68,3 +68,6 @@ bench/detection/.out/
 
 # Embedding benchmark artifacts (generated scores, vectors and reports, never committed)
 bench/embeddings/.out/
+
+__pycache__/
+*.py[cod]
