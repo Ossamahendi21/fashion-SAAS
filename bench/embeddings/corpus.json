@@ -1,0 +1,103 @@
+{
+  "schema": "embedding-bench/corpus@1",
+  "source": "convex/shared/demo_wardrobe.ts",
+  "contract": {
+    "replicatedFrom": "convex/ai/openai.ts embeddingInput",
+    "productionModified": false,
+    "fieldOrder": [
+      "name",
+      "category",
+      "subcategory",
+      "colours.primary",
+      "colours.secondary[]",
+      "colours.hex[]",
+      "pattern",
+      "material",
+      "description"
+    ],
+    "separator": " · ",
+    "emptyPartsDropped": true
+  },
+  "items": [
+    {
+      "id": "v2-men-blue-check-shirt",
+      "name": "Blue check shirt",
+      "embeddingText": "Blue check shirt · top · shirt · blue · black · white · #577b9e · #242424 · check · cotton · An adult men’s blue, black and white checked long-sleeve button-down shirt."
+    },
+    {
+      "id": "v2-men-blue-tropical-shirt",
+      "name": "Blue tropical shirt",
+      "embeddingText": "Blue tropical shirt · top · short-sleeve shirt · blue · white · #235c84 · #dbe4eb · floral · cotton · An adult men’s relaxed short-sleeve blue shirt with a white tropical leaf print."
+    },
+    {
+      "id": "v2-men-mens-henley",
+      "name": "Two-tone Henley",
+      "embeddingText": "Two-tone Henley · top · Henley · grey · black · #bdbdbd · #202020 · colourblock · cotton · An adult men’s grey Henley with black raglan sleeves and a short button placket."
+    },
+    {
+      "id": "v2-men-mens-long-sleeve",
+      "name": "Navy long-sleeve tee",
+      "embeddingText": "Navy long-sleeve tee · top · long-sleeve T-shirt · navy · #3f5577 · solid · cotton · An adult men’s fitted navy long-sleeve crew-neck T-shirt."
+    },
+    {
+      "id": "v2-men-mens-cotton-jacket",
+      "name": "Sand field jacket",
+      "embeddingText": "Sand field jacket · outerwear · field jacket · beige · #b3a08b · solid · cotton · An adult men’s sand-coloured field jacket with stand collar and front pockets."
+    },
+    {
+      "id": "v2-men-colourblock-trainers",
+      "name": "Colourblock trainers",
+      "embeddingText": "Colourblock trainers · shoes · trainers · blue · yellow · white · red · #19769c · #eee166 · #f6f3e6 · colourblock · mixed · Adult men’s blue, yellow and cream low-top trainers with a red accent."
+    },
+    {
+      "id": "v2-men-white-red-trainers",
+      "name": "White and red trainers",
+      "embeddingText": "White and red trainers · shoes · trainers · white · red · #efefeb · #ad2534 · colourblock · synthetic · Adult men’s white low-top trainers with bold red panels and white laces."
+    },
+    {
+      "id": "v2-women-black-evening-gown",
+      "name": "Floral evening gown",
+      "embeddingText": "Floral evening gown · dress · maxi dress · black · pink · blue · green · #1b1b1b · #c27791 · #638fbb · floral · polyester · An adult women’s floor-length black gown with colourful flowers and short sleeves."
+    },
+    {
+      "id": "v2-women-womens-leather-jacket",
+      "name": "Black biker jacket",
+      "embeddingText": "Black biker jacket · outerwear · biker jacket · black · #252525 · solid · faux leather · An adult women’s fitted black faux-leather jacket with a hood and zipped pockets."
+    },
+    {
+      "id": "v2-women-womens-blouse",
+      "name": "White draped top",
+      "embeddingText": "White draped top · top · blouse · white · #efefef · solid · viscose blend · An adult women’s white short-sleeve top with a wide neckline and draped waist."
+    },
+    {
+      "id": "v2-women-womens-sport-top",
+      "name": "Red V-neck tee",
+      "embeddingText": "Red V-neck tee · top · T-shirt · red · #c31e39 · solid · polyester · An adult women’s red V-neck short-sleeve sports T-shirt."
+    },
+    {
+      "id": "v2-women-black-heeled-sandals",
+      "name": "Black heeled sandals",
+      "embeddingText": "Black heeled sandals · shoes · heeled sandals · black · #252525 · solid · leather · Adult women’s black open-toe heeled sandals with wide front and ankle straps."
+    },
+    {
+      "id": "v2-women-white-red-trainers",
+      "name": "White and red trainers",
+      "embeddingText": "White and red trainers · shoes · trainers · white · red · #efefeb · #ad2534 · colourblock · synthetic · Adult women’s white low-top trainers with bold red panels and white laces."
+    },
+    {
+      "id": "v2-women-brown-leather-bag",
+      "name": "Brown shoulder bag",
+      "embeddingText": "Brown shoulder bag · bag · shoulder bag · brown · #895030 · solid · leather · An adult women’s brown leather shoulder bag with two handles and gold-tone hardware."
+    },
+    {
+      "id": "v2-men-blue-jeans",
+      "name": "Straight-leg blue jeans",
+      "embeddingText": "Straight-leg blue jeans · bottom · jeans · blue · #527db2 · solid · denim · Adult straight-leg blue denim jeans with classic five-pocket styling."
+    },
+    {
+      "id": "v2-women-blue-jeans",
+      "name": "Straight-leg blue jeans",
+      "embeddingText": "Straight-leg blue jeans · bottom · jeans · blue · #527db2 · solid · denim · Adult straight-leg blue denim jeans with classic five-pocket styling."
+    }
+  ]
+}

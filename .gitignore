@@ -65,3 +65,6 @@ bench/render/.out/
 
 # Detection benchmark artifacts (generated masks, boxes and reports, never committed)
 bench/detection/.out/
+
+# Embedding benchmark artifacts (generated scores, vectors and reports, never committed)
+bench/embeddings/.out/

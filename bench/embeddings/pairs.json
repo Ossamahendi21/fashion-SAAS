@@ -1,0 +1,3613 @@
+{
+  "schema": "embedding-bench/pairs@1",
+  "authoredBy": "human (bench/embeddings/pairs.source.mjs)",
+  "contract": {
+    "classes": [
+      "true_duplicate",
+      "same_garment_alt_wording",
+      "near_duplicate",
+      "same_category_diff_colour",
+      "same_colour_diff_category",
+      "related_not_duplicate",
+      "hard_negative"
+    ],
+    "labels": {
+      "true_duplicate": {
+        "isDuplicate": true,
+        "isStronglySimilar": true,
+        "meaning": "the same physical garment listed twice (different retailer wording or photos)"
+      },
+      "same_garment_alt_wording": {
+        "isDuplicate": true,
+        "isStronglySimilar": true,
+        "meaning": "the same physical garment with no attribute change, described in different vocabulary or with reordered clauses"
+      },
+      "near_duplicate": {
+        "isDuplicate": false,
+        "isStronglySimilar": true,
+        "meaning": "one important attribute differs (colour, wash, fit, length, neckline, material), so it is a different garment but the nearest sensible neighbour"
+      },
+      "same_category_diff_colour": {
+        "isDuplicate": false,
+        "isStronglySimilar": true,
+        "meaning": "same garment type and subcategory in a different colourway"
+      },
+      "same_colour_diff_category": {
+        "isDuplicate": false,
+        "isStronglySimilar": false,
+        "meaning": "the shared colour is the only overlapping attribute; unrelated garment classes"
+      },
+      "related_not_duplicate": {
+        "isDuplicate": false,
+        "isStronglySimilar": false,
+        "meaning": "complementary wardrobe roles in one style family (worn together, not similar), so not neighbours in a similarity ranking"
+      },
+      "hard_negative": {
+        "isDuplicate": false,
+        "isStronglySimilar": false,
+        "meaning": "high lexical or material overlap but a genuinely different garment (denim jacket vs denim jeans, bag vs belt, shirt vs shirt dress)"
+      }
+    },
+    "invariants": [
+      "isDuplicate => isStronglySimilar"
+    ],
+    "phase": "B0 human labels only; Phase B derives the numeric gates from these frozen labels"
+  },
+  "pairs": [
+    {
+      "id": "td-001",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "One shirt sold by two retailers; only the retailer's wording differs.",
+      "a": {
+        "name": "Classic white oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Men's white button-down shirt in breathable cotton oxford with a buttoned collar.",
+        "embeddingText": "Classic white oxford shirt · top · shirt · white · #f4f4f0 · solid · cotton · Men's white button-down shirt in breathable cotton oxford with a buttoned collar."
+      },
+      "b": {
+        "name": "White button-up oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "A men's white button-up shirt made from cotton oxford cloth with a button-down collar.",
+        "embeddingText": "White button-up oxford shirt · top · shirt · white · #f4f4f0 · solid · cotton · A men's white button-up shirt made from cotton oxford cloth with a button-down collar."
+      }
+    },
+    {
+      "id": "td-002",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same product line, two retailer descriptions.",
+      "a": {
+        "name": "Navy slim-fit chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Slim navy chinos in stretch cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Navy slim-fit chinos · bottom · chinos · navy · #1f2a44 · solid · cotton · Slim navy chinos in stretch cotton twill with side pockets and a slim tapered leg."
+      },
+      "b": {
+        "name": "Slim navy cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos in navy cotton twill, cut slim through the leg with side pockets.",
+        "embeddingText": "Slim navy cotton chinos · bottom · chinos · navy · #1f2a44 · solid · cotton · Chinos in navy cotton twill, cut slim through the leg with side pockets."
+      }
+    },
+    {
+      "id": "td-003",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same boot; 'ankle boots' is the retailer's wording for the same Chelsea silhouette.",
+      "a": {
+        "name": "Black Chelsea boots in leather",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Men's black leather Chelsea boots with an elastic side panel and a stacked heel.",
+        "embeddingText": "Black Chelsea boots in leather · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Men's black leather Chelsea boots with an elastic side panel and a stacked heel."
+      },
+      "b": {
+        "name": "Leather black ankle boots",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Black ankle boots cut from leather, finished with elastic gussets and a low stacked heel.",
+        "embeddingText": "Leather black ankle boots · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Black ankle boots cut from leather, finished with elastic gussets and a low stacked heel."
+      }
+    },
+    {
+      "id": "td-004",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same dress, two listings from different stockists.",
+      "a": {
+        "name": "Floral-print maxi dress",
+        "category": "dress",
+        "subcategory": "maxi dress",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "pink",
+            "cream"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#d9a3ae",
+            "#f0ead9"
+          ]
+        },
+        "pattern": "floral",
+        "material": "polyester",
+        "description": "Floor-length floral print maxi dress in polyester with a V-neckline and short sleeves.",
+        "embeddingText": "Floral-print maxi dress · dress · maxi dress · navy · pink · cream · #1f2a44 · #d9a3ae · #f0ead9 · floral · polyester · Floor-length floral print maxi dress in polyester with a V-neckline and short sleeves."
+      },
+      "b": {
+        "name": "Long floral dress with deep V neck",
+        "category": "dress",
+        "subcategory": "maxi dress",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "pink",
+            "cream"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#d9a3ae",
+            "#f0ead9"
+          ]
+        },
+        "pattern": "floral",
+        "material": "polyester",
+        "description": "A long floral dress in polyester with a plunging V neckline, short sleeves and a full-length skirt.",
+        "embeddingText": "Long floral dress with deep V neck · dress · maxi dress · navy · pink · cream · #1f2a44 · #d9a3ae · #f0ead9 · floral · polyester · A long floral dress in polyester with a plunging V neckline, short sleeves and a full-length skirt."
+      }
+    },
+    {
+      "id": "td-005",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same sweatshirt; 'marl' and 'heather' are synonyms here.",
+      "a": {
+        "name": "Heather grey hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Grey marl sweatshirt in heavyweight cotton fleece with a hood and ribbed cuffs.",
+        "embeddingText": "Heather grey hooded sweatshirt · top · sweatshirt · grey · #8f8f8f · solid · cotton · Grey marl sweatshirt in heavyweight cotton fleece with a hood and ribbed cuffs."
+      },
+      "b": {
+        "name": "Cotton hooded sweatshirt in heather grey",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "A hooded sweatshirt in heather grey cotton fleece, finished with ribbed cuffs and a drawstring hood.",
+        "embeddingText": "Cotton hooded sweatshirt in heather grey · top · sweatshirt · grey · #8f8f8f · solid · cotton · A hooded sweatshirt in heather grey cotton fleece, finished with ribbed cuffs and a drawstring hood."
+      }
+    },
+    {
+      "id": "td-006",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same coat; 'sand-coloured' and 'beige' are the same colourway.",
+      "a": {
+        "name": "Sand-coloured trench coat",
+        "category": "outerwear",
+        "subcategory": "trench coat",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Belted sand-coloured trench coat in cotton gabardine with epaulettes and storm flap.",
+        "embeddingText": "Sand-coloured trench coat · outerwear · trench coat · beige · #d9cbb3 · solid · cotton · Belted sand-coloured trench coat in cotton gabardine with epaulettes and storm flap."
+      },
+      "b": {
+        "name": "Classic beige belted trench",
+        "category": "outerwear",
+        "subcategory": "trench coat",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "A classic belted beige trench in cotton gabardine, detailed with shoulder epaulettes and a storm flap.",
+        "embeddingText": "Classic beige belted trench · outerwear · trench coat · beige · #d9cbb3 · solid · cotton · A classic belted beige trench in cotton gabardine, detailed with shoulder epaulettes and a storm flap."
+      }
+    },
+    {
+      "id": "td-007",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same jacket; wash described qualitatively in both listings.",
+      "a": {
+        "name": "Light wash denim trucker jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Light wash denim trucker jacket with a pointed collar, two chest pockets and button front.",
+        "embeddingText": "Light wash denim trucker jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Light wash denim trucker jacket with a pointed collar, two chest pockets and button front."
+      },
+      "b": {
+        "name": "Washed denim jacket, trucker style",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Washed blue denim jacket in a classic trucker cut with a pointed collar and two buttoned chest pockets.",
+        "embeddingText": "Washed denim jacket, trucker style · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Washed blue denim jacket in a classic trucker cut with a pointed collar and two buttoned chest pockets."
+      }
+    },
+    {
+      "id": "td-008",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same jacket; 'faux leather' and 'leather-look' name the same material.",
+      "a": {
+        "name": "Black biker jacket in faux leather",
+        "category": "outerwear",
+        "subcategory": "biker jacket",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "faux leather",
+        "description": "Women's black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets.",
+        "embeddingText": "Black biker jacket in faux leather · outerwear · biker jacket · black · #1c1c1c · solid · faux leather · Women's black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets."
+      },
+      "b": {
+        "name": "Leather-look biker jacket",
+        "category": "outerwear",
+        "subcategory": "biker jacket",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "faux leather",
+        "description": "A biker jacket in a black leather-look finish with asymmetric zip fastening and zipped pockets.",
+        "embeddingText": "Leather-look biker jacket · outerwear · biker jacket · black · #1c1c1c · solid · faux leather · A biker jacket in a black leather-look finish with asymmetric zip fastening and zipped pockets."
+      }
+    },
+    {
+      "id": "td-009",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same scarf, identical stated dimensions.",
+      "a": {
+        "name": "Red wool scarf with fringed ends",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Pure new-wool scarf in red with fringed ends, generous 180 by 30 centimetre size.",
+        "embeddingText": "Red wool scarf with fringed ends · accessory · scarf · red · #a8202f · solid · wool · Pure new-wool scarf in red with fringed ends, generous 180 by 30 centimetre size."
+      },
+      "b": {
+        "name": "Fringed red scarf in wool",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "A red scarf woven from wool with knotted fringe at both ends, measuring 180 by 30 centimetres.",
+        "embeddingText": "Fringed red scarf in wool · accessory · scarf · red · #a8202f · solid · wool · A red scarf woven from wool with knotted fringe at both ends, measuring 180 by 30 centimetres."
+      }
+    },
+    {
+      "id": "td-010",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same coat; 'puffer' and 'padded' are synonyms.",
+      "a": {
+        "name": "Olive green quilted puffer coat",
+        "category": "outerwear",
+        "subcategory": "puffer coat",
+        "colours": {
+          "primary": "olive",
+          "secondary": [],
+          "hex": [
+            "#5f6141"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Olive green quilted puffer coat with horizontal baffles, a hood and a two-way zip.",
+        "embeddingText": "Olive green quilted puffer coat · outerwear · puffer coat · olive · #5f6141 · solid · polyester · Olive green quilted puffer coat with horizontal baffles, a hood and a two-way zip."
+      },
+      "b": {
+        "name": "Green padded winter coat",
+        "category": "outerwear",
+        "subcategory": "puffer coat",
+        "colours": {
+          "primary": "olive",
+          "secondary": [],
+          "hex": [
+            "#5f6141"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Padded winter coat in green with horizontal quilted baffles, a hood and a two-way zip front.",
+        "embeddingText": "Green padded winter coat · outerwear · puffer coat · olive · #5f6141 · solid · polyester · Padded winter coat in green with horizontal quilted baffles, a hood and a two-way zip front."
+      }
+    },
+    {
+      "id": "td-011",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same bag; 'tan' is the retailer's name for the brown colourway.",
+      "a": {
+        "name": "Brown leather shoulder bag",
+        "category": "bag",
+        "subcategory": "shoulder bag",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Adult women's brown leather shoulder bag with two top handles and gold-tone hardware.",
+        "embeddingText": "Brown leather shoulder bag · bag · shoulder bag · brown · #5b3a26 · solid · leather · Adult women's brown leather shoulder bag with two top handles and gold-tone hardware."
+      },
+      "b": {
+        "name": "Women's tan shoulder bag in leather",
+        "category": "bag",
+        "subcategory": "shoulder bag",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Shoulder bag in brown leather with twin handles and gold-tone fittings.",
+        "embeddingText": "Women's tan shoulder bag in leather · bag · shoulder bag · brown · #5b3a26 · solid · leather · Shoulder bag in brown leather with twin handles and gold-tone fittings."
+      }
+    },
+    {
+      "id": "td-012",
+      "cls": "true_duplicate",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Same tee listed twice with reordered wording.",
+      "a": {
+        "name": "Blue and white striped cotton T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Regular-fit T-shirt in cotton with blue and white horizontal stripes and a crew neck.",
+        "embeddingText": "Blue and white striped cotton T-shirt · top · T-shirt · blue · white · #2f5d9e · #f4f4f0 · striped · cotton · Regular-fit T-shirt in cotton with blue and white horizontal stripes and a crew neck."
+      },
+      "b": {
+        "name": "Striped tee in blue and white",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Classic striped tee with a crew neck in cotton, striped blue and white horizontally.",
+        "embeddingText": "Striped tee in blue and white · top · T-shirt · blue · white · #2f5d9e · #f4f4f0 · striped · cotton · Classic striped tee with a crew neck in cotton, striped blue and white horizontally."
+      }
+    },
+    {
+      "id": "sag-001",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: buttoned/button-down collar, long/full-length sleeves.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Men's blue Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "A men's blue shirt in cotton Oxford cloth with a buttoned collar and long sleeves.",
+        "embeddingText": "Men's blue Oxford shirt · top · shirt · blue · #2f5d9e · solid · cotton · A men's blue shirt in cotton Oxford cloth with a buttoned collar and long sleeves."
+      },
+      "b": {
+        "name": "Blue button-down shirt in Oxford weave",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Blue cotton shirt in an Oxford weave with a button-down collar and full-length sleeves.",
+        "embeddingText": "Blue button-down shirt in Oxford weave · top · shirt · blue · #2f5d9e · solid · cotton · Blue cotton shirt in an Oxford weave with a button-down collar and full-length sleeves."
+      }
+    },
+    {
+      "id": "sag-002",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: fit and fabric clauses swapped, neckline moved to the end.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "White cotton crew-neck T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "A white crew-neck T-shirt in 100% cotton, regular fit, with short sleeves and a plain finish.",
+        "embeddingText": "White cotton crew-neck T-shirt · top · T-shirt · white · #f4f4f0 · solid · cotton · A white crew-neck T-shirt in 100% cotton, regular fit, with short sleeves and a plain finish."
+      },
+      "b": {
+        "name": "Plain short-sleeve tee in white cotton",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Plain T-shirt with short sleeves and a regular fit, in white 100% cotton with a crew neck.",
+        "embeddingText": "Plain short-sleeve tee in white cotton · top · T-shirt · white · #f4f4f0 · solid · cotton · Plain T-shirt with short sleeves and a regular fit, in white 100% cotton with a crew neck."
+      }
+    },
+    {
+      "id": "sag-003",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: sweatshirt/pullover, grey/heather grey.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Grey sweatshirt in loopback cotton",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Grey hooded sweatshirt in loopback cotton with a kangaroo pocket and ribbed hem.",
+        "embeddingText": "Grey sweatshirt in loopback cotton · top · sweatshirt · grey · #8f8f8f · solid · cotton · Grey hooded sweatshirt in loopback cotton with a kangaroo pocket and ribbed hem."
+      },
+      "b": {
+        "name": "Heather grey pullover, cotton loopback, hooded",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Heather grey pullover in cotton loopback, hooded, with a kangaroo pocket and a ribbed hem.",
+        "embeddingText": "Heather grey pullover, cotton loopback, hooded · top · sweatshirt · grey · #8f8f8f · solid · cotton · Heather grey pullover in cotton loopback, hooded, with a kangaroo pocket and a ribbed hem."
+      }
+    },
+    {
+      "id": "sag-004",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: leg cut moved to the front.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Navy cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Navy chinos in cotton twill with side pockets, a zip fly and a straight tapered leg.",
+        "embeddingText": "Navy cotton chinos · bottom · chinos · navy · #1f2a44 · solid · cotton · Navy chinos in cotton twill with side pockets, a zip fly and a straight tapered leg."
+      },
+      "b": {
+        "name": "Chinos in navy twill with a straight leg",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos with a straight tapered leg, cut from navy cotton twill with a zip fly and side pockets.",
+        "embeddingText": "Chinos in navy twill with a straight leg · bottom · chinos · navy · #1f2a44 · solid · cotton · Chinos with a straight tapered leg, cut from navy cotton twill with a zip fly and side pockets."
+      }
+    },
+    {
+      "id": "sag-005",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: ankle boots/Chelsea boots, elastic side/gusset.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Black ankle boots in leather",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Men's black leather ankle boots with elastic side panels and a low stacked heel.",
+        "embeddingText": "Black ankle boots in leather · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Men's black leather ankle boots with elastic side panels and a low stacked heel."
+      },
+      "b": {
+        "name": "Leather Chelsea boots in black",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Black leather Chelsea boots with an elastic gusset side and a low stacked heel.",
+        "embeddingText": "Leather Chelsea boots in black · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Black leather Chelsea boots with an elastic gusset side and a low stacked heel."
+      }
+    },
+    {
+      "id": "sag-006",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: colour list moved to the end of the sentence.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Floral V-neck maxi dress",
+        "category": "dress",
+        "subcategory": "maxi dress",
+        "colours": {
+          "primary": "black",
+          "secondary": [
+            "pink",
+            "green"
+          ],
+          "hex": [
+            "#1c1c1c",
+            "#d9a3ae",
+            "#2f5d43"
+          ]
+        },
+        "pattern": "floral",
+        "material": "polyester",
+        "description": "A floral V-neck maxi dress with short sleeves and a floor-length skirt in polyester.",
+        "embeddingText": "Floral V-neck maxi dress · dress · maxi dress · black · pink · green · #1c1c1c · #d9a3ae · #2f5d43 · floral · polyester · A floral V-neck maxi dress with short sleeves and a floor-length skirt in polyester."
+      },
+      "b": {
+        "name": "Maxi dress with a V-neck and short sleeves",
+        "category": "dress",
+        "subcategory": "maxi dress",
+        "colours": {
+          "primary": "black",
+          "secondary": [
+            "pink",
+            "green"
+          ],
+          "hex": [
+            "#1c1c1c",
+            "#d9a3ae",
+            "#2f5d43"
+          ]
+        },
+        "pattern": "floral",
+        "material": "polyester",
+        "description": "Floor-length maxi dress in polyester with a V neckline, short sleeves and an all-over floral print in black, pink and green.",
+        "embeddingText": "Maxi dress with a V-neck and short sleeves · dress · maxi dress · black · pink · green · #1c1c1c · #d9a3ae · #2f5d43 · floral · polyester · Floor-length maxi dress in polyester with a V neckline, short sleeves and an all-over floral print in black, pink and green."
+      }
+    },
+    {
+      "id": "sag-007",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: straight-leg/straight cut.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Straight-leg blue jeans in denim",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Straight-leg jeans in mid-blue denim with classic five-pocket styling and a mid rise.",
+        "embeddingText": "Straight-leg blue jeans in denim · bottom · jeans · blue · #2f5d9e · solid · denim · Straight-leg jeans in mid-blue denim with classic five-pocket styling and a mid rise."
+      },
+      "b": {
+        "name": "Mid-blue jeans in a straight cut",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Mid-blue jeans cut straight through the leg, in denim with classic five-pocket styling and a mid rise.",
+        "embeddingText": "Mid-blue jeans in a straight cut · bottom · jeans · blue · #2f5d9e · solid · denim · Mid-blue jeans cut straight through the leg, in denim with classic five-pocket styling and a mid rise."
+      }
+    },
+    {
+      "id": "sag-008",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: laces and sole moved ahead of the panels.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "White low-top trainers with red panels",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [
+            "red"
+          ],
+          "hex": [
+            "#f4f4f0",
+            "#a8202f"
+          ]
+        },
+        "pattern": "colourblock",
+        "material": "synthetic",
+        "description": "Low-top trainers in synthetic with bold red panels, white laces and a rubber sole.",
+        "embeddingText": "White low-top trainers with red panels · shoes · trainers · white · red · #f4f4f0 · #a8202f · colourblock · synthetic · Low-top trainers in synthetic with bold red panels, white laces and a rubber sole."
+      },
+      "b": {
+        "name": "Trainers with white laces and a rubber sole",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [
+            "red"
+          ],
+          "hex": [
+            "#f4f4f0",
+            "#a8202f"
+          ]
+        },
+        "pattern": "colourblock",
+        "material": "synthetic",
+        "description": "Low-top synthetic trainers with white laces and a rubber sole, finished with bold red panels.",
+        "embeddingText": "Trainers with white laces and a rubber sole · shoes · trainers · white · red · #f4f4f0 · #a8202f · colourblock · synthetic · Low-top synthetic trainers with white laces and a rubber sole, finished with bold red panels."
+      }
+    },
+    {
+      "id": "sag-009",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: jumper/sweater, crew-neck/round-neck, lambswool/new-wool.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Burgundy crew-neck jumper in lambswool",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "Crew-neck jumper in burgundy lambswool with ribbed cuffs and a relaxed fit.",
+        "embeddingText": "Burgundy crew-neck jumper in lambswool · top · jumper · burgundy · #5c1a2b · solid · knit · Crew-neck jumper in burgundy lambswool with ribbed cuffs and a relaxed fit."
+      },
+      "b": {
+        "name": "Lambswool sweater in burgundy with a round neck",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "Round-neck lambswool sweater in burgundy, ribbed at the cuffs and cut in a relaxed fit.",
+        "embeddingText": "Lambswool sweater in burgundy with a round neck · top · jumper · burgundy · #5c1a2b · solid · knit · Round-neck lambswool sweater in burgundy, ribbed at the cuffs and cut in a relaxed fit."
+      }
+    },
+    {
+      "id": "sag-010",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: pocket clause moved to the end.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Olive field jacket in cotton",
+        "category": "outerwear",
+        "subcategory": "field jacket",
+        "colours": {
+          "primary": "olive",
+          "secondary": [],
+          "hex": [
+            "#5f6141"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Olive field jacket in cotton with four front pockets, a stand collar and a button front.",
+        "embeddingText": "Olive field jacket in cotton · outerwear · field jacket · olive · #5f6141 · solid · cotton · Olive field jacket in cotton with four front pockets, a stand collar and a button front."
+      },
+      "b": {
+        "name": "Field jacket with a button front and stand collar",
+        "category": "outerwear",
+        "subcategory": "field jacket",
+        "colours": {
+          "primary": "olive",
+          "secondary": [],
+          "hex": [
+            "#5f6141"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Cotton field jacket with a button front and a stand collar, plus four front patch pockets.",
+        "embeddingText": "Field jacket with a button front and stand collar · outerwear · field jacket · olive · #5f6141 · solid · cotton · Cotton field jacket with a button front and a stand collar, plus four front patch pockets."
+      }
+    },
+    {
+      "id": "sag-011",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Vocabulary changed: mom jeans, high-rise/high-waisted.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Mid-indigo mom jeans, high rise",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "High-rise mom jeans in mid-indigo denim with a relaxed straight leg and a cropped hem.",
+        "embeddingText": "Mid-indigo mom jeans, high rise · bottom · jeans · blue · #2f5d9e · solid · denim · High-rise mom jeans in mid-indigo denim with a relaxed straight leg and a cropped hem."
+      },
+      "b": {
+        "name": "High-waisted jeans in mid-indigo denim",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Jeans in a mid-indigo denim with a high waist, relaxed straight leg and a cropped hem.",
+        "embeddingText": "High-waisted jeans in mid-indigo denim · bottom · jeans · blue · #2f5d9e · solid · denim · Jeans in a mid-indigo denim with a high waist, relaxed straight leg and a cropped hem."
+      }
+    },
+    {
+      "id": "sag-012",
+      "cls": "same_garment_alt_wording",
+      "isDuplicate": true,
+      "isStronglySimilar": true,
+      "note": "Reordered description: fit clause moved to the end.",
+      "changedAttributes": [
+        "wording"
+      ],
+      "a": {
+        "name": "Cream linen blouse with a relaxed fit",
+        "category": "top",
+        "subcategory": "blouse",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "linen",
+        "description": "Relaxed-fit blouse in cream linen with a notch neckline and long balloon sleeves.",
+        "embeddingText": "Cream linen blouse with a relaxed fit · top · blouse · cream · #f0ead9 · solid · linen · Relaxed-fit blouse in cream linen with a notch neckline and long balloon sleeves."
+      },
+      "b": {
+        "name": "Blouse in cream linen with balloon sleeves",
+        "category": "top",
+        "subcategory": "blouse",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "linen",
+        "description": "Blouse cut from cream linen with long balloon sleeves, a notch neckline and a relaxed fit.",
+        "embeddingText": "Blouse in cream linen with balloon sleeves · top · blouse · cream · #f0ead9 · solid · linen · Blouse cut from cream linen with long balloon sleeves, a notch neckline and a relaxed fit."
+      }
+    },
+    {
+      "id": "nd-001",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Identical shirt in a different colourway.",
+      "changedAttributes": [
+        "colours.primary: navy -> blue"
+      ],
+      "a": {
+        "name": "Navy Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Navy shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "Navy Oxford shirt · top · shirt · navy · #1f2a44 · solid · cotton · Navy shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Blue Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Blue shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "Blue Oxford shirt · top · shirt · blue · #2f5d9e · solid · cotton · Blue shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      }
+    },
+    {
+      "id": "nd-002",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same trainer model, inverted colourway.",
+      "changedAttributes": [
+        "colours.primary: white -> black",
+        "colours.secondary: red -> white"
+      ],
+      "a": {
+        "name": "White trainers with red panels",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [
+            "red"
+          ],
+          "hex": [
+            "#f4f4f0",
+            "#a8202f"
+          ]
+        },
+        "pattern": "colourblock",
+        "material": "synthetic",
+        "description": "Low-top synthetic trainers with bold red panels, white laces and a rubber sole.",
+        "embeddingText": "White trainers with red panels · shoes · trainers · white · red · #f4f4f0 · #a8202f · colourblock · synthetic · Low-top synthetic trainers with bold red panels, white laces and a rubber sole."
+      },
+      "b": {
+        "name": "Black trainers with white panels",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "black",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#1c1c1c",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "colourblock",
+        "material": "synthetic",
+        "description": "Low-top synthetic trainers with bold white panels, black laces and a rubber sole.",
+        "embeddingText": "Black trainers with white panels · shoes · trainers · black · white · #1c1c1c · #f4f4f0 · colourblock · synthetic · Low-top synthetic trainers with bold white panels, black laces and a rubber sole."
+      }
+    },
+    {
+      "id": "nd-003",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same fit family, different leg cut.",
+      "changedAttributes": [
+        "subcategory detail: straight leg -> slim leg"
+      ],
+      "a": {
+        "name": "Straight-leg blue jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Blue jeans in denim with a straight leg, mid rise and classic five-pocket styling.",
+        "embeddingText": "Straight-leg blue jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Blue jeans in denim with a straight leg, mid rise and classic five-pocket styling."
+      },
+      "b": {
+        "name": "Slim-leg blue jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Blue jeans in denim with a slim tapered leg, mid rise and classic five-pocket styling.",
+        "embeddingText": "Slim-leg blue jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Blue jeans in denim with a slim tapered leg, mid rise and classic five-pocket styling."
+      }
+    },
+    {
+      "id": "nd-004",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same dress, different sleeve length.",
+      "changedAttributes": [
+        "sleeve length: long -> short"
+      ],
+      "a": {
+        "name": "Long-sleeve midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "viscose blend",
+        "description": "Midi dress in green viscose blend with long sleeves, a square neck and a belted waist.",
+        "embeddingText": "Long-sleeve midi dress · dress · midi dress · green · #2f5d43 · solid · viscose blend · Midi dress in green viscose blend with long sleeves, a square neck and a belted waist."
+      },
+      "b": {
+        "name": "Short-sleeve midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "viscose blend",
+        "description": "Midi dress in green viscose blend with short sleeves, a square neck and a belted waist.",
+        "embeddingText": "Short-sleeve midi dress · dress · midi dress · green · #2f5d43 · solid · viscose blend · Midi dress in green viscose blend with short sleeves, a square neck and a belted waist."
+      }
+    },
+    {
+      "id": "nd-005",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same jumper, different neckline.",
+      "changedAttributes": [
+        "neckline: crew -> V"
+      ],
+      "a": {
+        "name": "Grey crew-neck jumper",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Grey crew-neck jumper · top · jumper · grey · #8f8f8f · solid · knit · wool"
+      },
+      "b": {
+        "name": "Grey V-neck jumper",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Grey V-neck jumper · top · jumper · grey · #8f8f8f · solid · knit · wool"
+      }
+    },
+    {
+      "id": "nd-006",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same coat, belt is the only design difference.",
+      "changedAttributes": [
+        "belt: present -> absent"
+      ],
+      "a": {
+        "name": "Belted beige trench coat",
+        "category": "outerwear",
+        "subcategory": "trench coat",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Beige trench coat in cotton gabardine with a removable belt, epaulettes and a storm flap.",
+        "embeddingText": "Belted beige trench coat · outerwear · trench coat · beige · #d9cbb3 · solid · cotton · Beige trench coat in cotton gabardine with a removable belt, epaulettes and a storm flap."
+      },
+      "b": {
+        "name": "Unbelted beige trench coat",
+        "category": "outerwear",
+        "subcategory": "trench coat",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Beige trench coat in cotton gabardine without a belt, with epaulettes and a storm flap.",
+        "embeddingText": "Unbelted beige trench coat · outerwear · trench coat · beige · #d9cbb3 · solid · cotton · Beige trench coat in cotton gabardine without a belt, with epaulettes and a storm flap."
+      }
+    },
+    {
+      "id": "nd-007",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same bag shape and handle layout, different material (and the colour that follows it).",
+      "changedAttributes": [
+        "material: canvas -> leather",
+        "colours.primary: beige -> brown"
+      ],
+      "a": {
+        "name": "Natural canvas tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Tote bag in natural cotton canvas with reinforced handles and an open top.",
+        "embeddingText": "Natural canvas tote bag · bag · tote bag · beige · #d9cbb3 · solid · canvas · Tote bag in natural cotton canvas with reinforced handles and an open top."
+      },
+      "b": {
+        "name": "Tan leather tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Tote bag in tan leather with reinforced handles and an open top.",
+        "embeddingText": "Tan leather tote bag · bag · tote bag · brown · #5b3a26 · solid · leather · Tote bag in tan leather with reinforced handles and an open top."
+      }
+    },
+    {
+      "id": "nd-008",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same jacket, different wash.",
+      "changedAttributes": [
+        "wash: light -> mid"
+      ],
+      "a": {
+        "name": "Light wash denim jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Light wash denim jacket with a pointed collar, two chest pockets and a button front.",
+        "embeddingText": "Light wash denim jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Light wash denim jacket with a pointed collar, two chest pockets and a button front."
+      },
+      "b": {
+        "name": "Mid wash denim jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Mid wash denim jacket with a pointed collar, two chest pockets and a button front.",
+        "embeddingText": "Mid wash denim jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Mid wash denim jacket with a pointed collar, two chest pockets and a button front."
+      }
+    },
+    {
+      "id": "nd-009",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same fabric and colour, different silhouette and length.",
+      "changedAttributes": [
+        "silhouette: A-line -> pencil",
+        "length: above knee -> knee"
+      ],
+      "a": {
+        "name": "Black A-line skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "A-line skirt in black polyester, sitting at the natural waist and falling above the knee.",
+        "embeddingText": "Black A-line skirt · bottom · skirt · black · #1c1c1c · solid · polyester · A-line skirt in black polyester, sitting at the natural waist and falling above the knee."
+      },
+      "b": {
+        "name": "Black pencil skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Pencil skirt in black polyester, sitting at the natural waist and falling to the knee.",
+        "embeddingText": "Black pencil skirt · bottom · skirt · black · #1c1c1c · solid · polyester · Pencil skirt in black polyester, sitting at the natural waist and falling to the knee."
+      }
+    },
+    {
+      "id": "nd-010",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Identical sweatshirt in a different colour.",
+      "changedAttributes": [
+        "colours.primary: grey -> navy"
+      ],
+      "a": {
+        "name": "Grey hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in grey cotton fleece with a kangaroo pocket and ribbed cuffs.",
+        "embeddingText": "Grey hooded sweatshirt · top · sweatshirt · grey · #8f8f8f · solid · cotton · Hooded sweatshirt in grey cotton fleece with a kangaroo pocket and ribbed cuffs."
+      },
+      "b": {
+        "name": "Navy hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in navy cotton fleece with a kangaroo pocket and ribbed cuffs.",
+        "embeddingText": "Navy hooded sweatshirt · top · sweatshirt · navy · #1f2a44 · solid · cotton · Hooded sweatshirt in navy cotton fleece with a kangaroo pocket and ribbed cuffs."
+      }
+    },
+    {
+      "id": "nd-011",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Identical chinos in a different colour.",
+      "changedAttributes": [
+        "colours.primary: navy -> khaki"
+      ],
+      "a": {
+        "name": "Navy cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos in navy cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Navy cotton chinos · bottom · chinos · navy · #1f2a44 · solid · cotton · Chinos in navy cotton twill with side pockets and a slim tapered leg."
+      },
+      "b": {
+        "name": "Khaki cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "khaki",
+          "secondary": [],
+          "hex": [
+            "#b5a887"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos in khaki cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Khaki cotton chinos · bottom · chinos · khaki · #b5a887 · solid · cotton · Chinos in khaki cotton twill with side pockets and a slim tapered leg."
+      }
+    },
+    {
+      "id": "nd-012",
+      "cls": "near_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same cardigan, different length.",
+      "changedAttributes": [
+        "length: cropped -> longline"
+      ],
+      "a": {
+        "name": "Cropped cream cardigan",
+        "category": "top",
+        "subcategory": "cardigan",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Cropped cream cardigan · top · cardigan · cream · #f0ead9 · solid · knit · wool"
+      },
+      "b": {
+        "name": "Longline cream cardigan",
+        "category": "top",
+        "subcategory": "cardigan",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Longline cream cardigan · top · cardigan · cream · #f0ead9 · solid · knit · wool"
+      }
+    },
+    {
+      "id": "sc-001",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same shirt, white versus navy colourway.",
+      "a": {
+        "name": "White Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "White shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "White Oxford shirt · top · shirt · white · #f4f4f0 · solid · cotton · White shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Navy Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Navy shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "Navy Oxford shirt · top · shirt · navy · #1f2a44 · solid · cotton · Navy shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      }
+    },
+    {
+      "id": "sc-002",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same chinos, black versus beige.",
+      "a": {
+        "name": "Black cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos in black cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Black cotton chinos · bottom · chinos · black · #1c1c1c · solid · cotton · Chinos in black cotton twill with side pockets and a slim tapered leg."
+      },
+      "b": {
+        "name": "Beige cotton chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Chinos in beige cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Beige cotton chinos · bottom · chinos · beige · #d9cbb3 · solid · cotton · Chinos in beige cotton twill with side pockets and a slim tapered leg."
+      }
+    },
+    {
+      "id": "sc-003",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same sweatshirt, grey versus green.",
+      "a": {
+        "name": "Grey hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in grey cotton fleece with a kangaroo pocket and ribbed cuffs.",
+        "embeddingText": "Grey hooded sweatshirt · top · sweatshirt · grey · #8f8f8f · solid · cotton · Hooded sweatshirt in grey cotton fleece with a kangaroo pocket and ribbed cuffs."
+      },
+      "b": {
+        "name": "Green hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in green cotton fleece with a kangaroo pocket and ribbed cuffs.",
+        "embeddingText": "Green hooded sweatshirt · top · sweatshirt · green · #2f5d43 · solid · cotton · Hooded sweatshirt in green cotton fleece with a kangaroo pocket and ribbed cuffs."
+      }
+    },
+    {
+      "id": "sc-004",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same dress, burgundy versus navy.",
+      "a": {
+        "name": "Burgundy midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Midi dress in burgundy polyester with short sleeves, a round neck and a belted waist.",
+        "embeddingText": "Burgundy midi dress · dress · midi dress · burgundy · #5c1a2b · solid · polyester · Midi dress in burgundy polyester with short sleeves, a round neck and a belted waist."
+      },
+      "b": {
+        "name": "Navy midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Midi dress in navy polyester with short sleeves, a round neck and a belted waist.",
+        "embeddingText": "Navy midi dress · dress · midi dress · navy · #1f2a44 · solid · polyester · Midi dress in navy polyester with short sleeves, a round neck and a belted waist."
+      }
+    },
+    {
+      "id": "sc-005",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same boot, brown versus black.",
+      "a": {
+        "name": "Brown Chelsea boots",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Brown leather Chelsea boots with an elastic side panel and a stacked heel.",
+        "embeddingText": "Brown Chelsea boots · shoes · Chelsea boots · brown · #5b3a26 · solid · leather · Brown leather Chelsea boots with an elastic side panel and a stacked heel."
+      },
+      "b": {
+        "name": "Black Chelsea boots",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Black leather Chelsea boots with an elastic side panel and a stacked heel.",
+        "embeddingText": "Black Chelsea boots · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Black leather Chelsea boots with an elastic side panel and a stacked heel."
+      }
+    },
+    {
+      "id": "sc-006",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same tote, navy versus pink.",
+      "a": {
+        "name": "Navy tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Tote bag in navy cotton canvas with reinforced handles and an open top.",
+        "embeddingText": "Navy tote bag · bag · tote bag · navy · #1f2a44 · solid · canvas · Tote bag in navy cotton canvas with reinforced handles and an open top."
+      },
+      "b": {
+        "name": "Pink tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "pink",
+          "secondary": [],
+          "hex": [
+            "#d9a3ae"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Tote bag in pink cotton canvas with reinforced handles and an open top.",
+        "embeddingText": "Pink tote bag · bag · tote bag · pink · #d9a3ae · solid · canvas · Tote bag in pink cotton canvas with reinforced handles and an open top."
+      }
+    },
+    {
+      "id": "sc-007",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same tee, red versus blue.",
+      "a": {
+        "name": "Red cotton T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Crew-neck T-shirt in red cotton with short sleeves and a regular fit.",
+        "embeddingText": "Red cotton T-shirt · top · T-shirt · red · #a8202f · solid · cotton · Crew-neck T-shirt in red cotton with short sleeves and a regular fit."
+      },
+      "b": {
+        "name": "Blue cotton T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Crew-neck T-shirt in blue cotton with short sleeves and a regular fit.",
+        "embeddingText": "Blue cotton T-shirt · top · T-shirt · blue · #2f5d9e · solid · cotton · Crew-neck T-shirt in blue cotton with short sleeves and a regular fit."
+      }
+    },
+    {
+      "id": "sc-008",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same coat, camel versus grey.",
+      "a": {
+        "name": "Camel wool coat",
+        "category": "outerwear",
+        "subcategory": "coat",
+        "colours": {
+          "primary": "camel",
+          "secondary": [],
+          "hex": [
+            "#c39a63"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Camel wool coat with a notch lapel, long sleeves and a straight hem.",
+        "embeddingText": "Camel wool coat · outerwear · coat · camel · #c39a63 · solid · wool · Camel wool coat with a notch lapel, long sleeves and a straight hem."
+      },
+      "b": {
+        "name": "Grey wool coat",
+        "category": "outerwear",
+        "subcategory": "coat",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Grey wool coat with a notch lapel, long sleeves and a straight hem.",
+        "embeddingText": "Grey wool coat · outerwear · coat · grey · #8f8f8f · solid · wool · Grey wool coat with a notch lapel, long sleeves and a straight hem."
+      }
+    },
+    {
+      "id": "sc-009",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same striped shirt, different stripe colour.",
+      "a": {
+        "name": "Navy and white striped shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Shirt in cotton with navy and white vertical stripes, a button-down collar and long sleeves.",
+        "embeddingText": "Navy and white striped shirt · top · shirt · navy · white · #1f2a44 · #f4f4f0 · striped · cotton · Shirt in cotton with navy and white vertical stripes, a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Green and white striped shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "green",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d43",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Shirt in cotton with green and white vertical stripes, a button-down collar and long sleeves.",
+        "embeddingText": "Green and white striped shirt · top · shirt · green · white · #2f5d43 · #f4f4f0 · striped · cotton · Shirt in cotton with green and white vertical stripes, a button-down collar and long sleeves."
+      }
+    },
+    {
+      "id": "sc-010",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same skirt, black versus cream.",
+      "a": {
+        "name": "Black A-line skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "A-line skirt in black polyester, sitting at the natural waist and falling above the knee.",
+        "embeddingText": "Black A-line skirt · bottom · skirt · black · #1c1c1c · solid · polyester · A-line skirt in black polyester, sitting at the natural waist and falling above the knee."
+      },
+      "b": {
+        "name": "Cream A-line skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "A-line skirt in cream polyester, sitting at the natural waist and falling above the knee.",
+        "embeddingText": "Cream A-line skirt · bottom · skirt · cream · #f0ead9 · solid · polyester · A-line skirt in cream polyester, sitting at the natural waist and falling above the knee."
+      }
+    },
+    {
+      "id": "sc-011",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same beanie, beige versus navy.",
+      "a": {
+        "name": "Be lambswool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Be lambswool beanie · headwear · beanie · beige · #d9cbb3 · solid · knit · wool"
+      },
+      "b": {
+        "name": "Navy lambswool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Navy lambswool beanie · headwear · beanie · navy · #1f2a44 · solid · knit · wool"
+      }
+    },
+    {
+      "id": "sc-012",
+      "cls": "same_category_diff_colour",
+      "isDuplicate": false,
+      "isStronglySimilar": true,
+      "note": "Same trainer, white versus black.",
+      "a": {
+        "name": "White low-top trainers",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "synthetic",
+        "description": "Low-top trainers in white synthetic with a rubber sole and white laces.",
+        "embeddingText": "White low-top trainers · shoes · trainers · white · #f4f4f0 · solid · synthetic · Low-top trainers in white synthetic with a rubber sole and white laces."
+      },
+      "b": {
+        "name": "Black low-top trainers",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "synthetic",
+        "description": "Low-top trainers in black synthetic with a rubber sole and black laces.",
+        "embeddingText": "Black low-top trainers · shoes · trainers · black · #1c1c1c · solid · synthetic · Low-top trainers in black synthetic with a rubber sole and black laces."
+      }
+    },
+    {
+      "id": "sd-001",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both navy; a bottom and a top with nothing else shared.",
+      "a": {
+        "name": "Navy blue jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Blue jeans in navy denim with a straight leg and classic five-pocket styling.",
+        "embeddingText": "Navy blue jeans · bottom · jeans · navy · #1f2a44 · solid · denim · Blue jeans in navy denim with a straight leg and classic five-pocket styling."
+      },
+      "b": {
+        "name": "Navy hooded sweatshirt",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in navy cotton fleece with a kangaroo pocket and ribbed cuffs.",
+        "embeddingText": "Navy hooded sweatshirt · top · sweatshirt · navy · #1f2a44 · solid · cotton · Hooded sweatshirt in navy cotton fleece with a kangaroo pocket and ribbed cuffs."
+      }
+    },
+    {
+      "id": "sd-002",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both black; outerwear and a sports bag.",
+      "a": {
+        "name": "Black biker jacket",
+        "category": "outerwear",
+        "subcategory": "biker jacket",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "faux leather",
+        "description": "Black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets.",
+        "embeddingText": "Black biker jacket · outerwear · biker jacket · black · #1c1c1c · solid · faux leather · Black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets."
+      },
+      "b": {
+        "name": "Black gym bag",
+        "category": "bag",
+        "subcategory": "holdall",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Black holdall gym bag in polyester with a shoulder strap and a zip opening.",
+        "embeddingText": "Black gym bag · bag · holdall · black · #1c1c1c · solid · polyester · Black holdall gym bag in polyester with a shoulder strap and a zip opening."
+      }
+    },
+    {
+      "id": "sd-003",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both white; a blouse and a shoe.",
+      "a": {
+        "name": "White draped blouse",
+        "category": "top",
+        "subcategory": "blouse",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "viscose blend",
+        "description": "White short-sleeve blouse in viscose blend with a wide neckline and a draped waist.",
+        "embeddingText": "White draped blouse · top · blouse · white · #f4f4f0 · solid · viscose blend · White short-sleeve blouse in viscose blend with a wide neckline and a draped waist."
+      },
+      "b": {
+        "name": "White low-top trainers",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "synthetic",
+        "description": "Low-top trainers in white synthetic with a rubber sole and white laces.",
+        "embeddingText": "White low-top trainers · shoes · trainers · white · #f4f4f0 · solid · synthetic · Low-top trainers in white synthetic with a rubber sole and white laces."
+      }
+    },
+    {
+      "id": "sd-004",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both beige; outerwear and a shoe.",
+      "a": {
+        "name": "Beige trench coat",
+        "category": "outerwear",
+        "subcategory": "trench coat",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Belted beige trench coat in cotton gabardine with epaulettes and a storm flap.",
+        "embeddingText": "Beige trench coat · outerwear · trench coat · beige · #d9cbb3 · solid · cotton · Belted beige trench coat in cotton gabardine with epaulettes and a storm flap."
+      },
+      "b": {
+        "name": "Beige suede loafers",
+        "category": "shoes",
+        "subcategory": "loafers",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "suede",
+        "description": "Beige suede loafers with a penny bar, a leather lining and a stacked heel.",
+        "embeddingText": "Beige suede loafers · shoes · loafers · beige · #d9cbb3 · solid · suede · Beige suede loafers with a penny bar, a leather lining and a stacked heel."
+      }
+    },
+    {
+      "id": "sd-005",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both red; a dress and headwear.",
+      "a": {
+        "name": "Red midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Midi dress in red polyester with short sleeves, a round neck and a belted waist.",
+        "embeddingText": "Red midi dress · dress · midi dress · red · #a8202f · solid · polyester · Midi dress in red polyester with short sleeves, a round neck and a belted waist."
+      },
+      "b": {
+        "name": "Red wool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Red wool beanie · headwear · beanie · red · #a8202f · solid · knit · wool"
+      }
+    },
+    {
+      "id": "sd-006",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both brown leather; a shoe and an accessory.",
+      "a": {
+        "name": "Brown leather brogues",
+        "category": "shoes",
+        "subcategory": "brogues",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Brown leather brogues with a medallion toe, a Goodyear welt and a leather sole.",
+        "embeddingText": "Brown leather brogues · shoes · brogues · brown · #5b3a26 · solid · leather · Brown leather brogues with a medallion toe, a Goodyear welt and a leather sole."
+      },
+      "b": {
+        "name": "Brown leather belt",
+        "category": "accessory",
+        "subcategory": "belt",
+        "colours": {
+          "primary": "brown",
+          "secondary": [],
+          "hex": [
+            "#5b3a26"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Brown leather belt with a 35 millimetre brass buckle and punched holes.",
+        "embeddingText": "Brown leather belt · accessory · belt · brown · #5b3a26 · solid · leather · Brown leather belt with a 35 millimetre brass buckle and punched holes."
+      }
+    },
+    {
+      "id": "sd-007",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both green; a knitwear top and a bag.",
+      "a": {
+        "name": "Green lambswool cardigan",
+        "category": "top",
+        "subcategory": "cardigan",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Green lambswool cardigan · top · cardigan · green · #2f5d43 · solid · knit · wool"
+      },
+      "b": {
+        "name": "Green tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Tote bag in green cotton canvas with reinforced handles and an open top.",
+        "embeddingText": "Green tote bag · bag · tote bag · green · #2f5d43 · solid · canvas · Tote bag in green cotton canvas with reinforced handles and an open top."
+      }
+    },
+    {
+      "id": "sd-008",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both grey wool; tailored trousers and a hat.",
+      "a": {
+        "name": "Grey tailored trousers",
+        "category": "bottom",
+        "subcategory": "trousers",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Tailored trousers in grey wool with a flat front, side pockets and a pressed crease.",
+        "embeddingText": "Grey tailored trousers · bottom · trousers · grey · #8f8f8f · solid · wool · Tailored trousers in grey wool with a flat front, side pockets and a pressed crease."
+      },
+      "b": {
+        "name": "Grey wool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Grey wool beanie · headwear · beanie · grey · #8f8f8f · solid · knit · wool"
+      }
+    },
+    {
+      "id": "sd-009",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both black; a skirt and a boot.",
+      "a": {
+        "name": "Black A-line skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "A-line skirt in black polyester, sitting at the natural waist and falling above the knee.",
+        "embeddingText": "Black A-line skirt · bottom · skirt · black · #1c1c1c · solid · polyester · A-line skirt in black polyester, sitting at the natural waist and falling above the knee."
+      },
+      "b": {
+        "name": "Black ankle boots",
+        "category": "shoes",
+        "subcategory": "Chelsea boots",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Black leather ankle boots with an elastic side panel and a stacked heel.",
+        "embeddingText": "Black ankle boots · shoes · Chelsea boots · black · #1c1c1c · solid · leather · Black leather ankle boots with an elastic side panel and a stacked heel."
+      }
+    },
+    {
+      "id": "sd-010",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both cream; a shirt and a handbag.",
+      "a": {
+        "name": "Cream oversized shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Oversized cream shirt in cotton with a relaxed fit, a camp collar and long sleeves.",
+        "embeddingText": "Cream oversized shirt · top · shirt · cream · #f0ead9 · solid · cotton · Oversized cream shirt in cotton with a relaxed fit, a camp collar and long sleeves."
+      },
+      "b": {
+        "name": "Cream handbag",
+        "category": "bag",
+        "subcategory": "handbag",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Small cream handbag in leather with a top handle, a magnetic closure and gold-tone studs.",
+        "embeddingText": "Cream handbag · bag · handbag · cream · #f0ead9 · solid · leather · Small cream handbag in leather with a top handle, a magnetic closure and gold-tone studs."
+      }
+    },
+    {
+      "id": "sd-011",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both burgundy wool; knitwear and an accessory.",
+      "a": {
+        "name": "Burgundy lambswool jumper",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Burgundy lambswool jumper · top · jumper · burgundy · #5c1a2b · solid · knit · wool"
+      },
+      "b": {
+        "name": "Burgundy wool scarf",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "A burgundy scarf woven from wool with knotted fringe at both ends.",
+        "embeddingText": "Burgundy wool scarf · accessory · scarf · burgundy · #5c1a2b · solid · wool · A burgundy scarf woven from wool with knotted fringe at both ends."
+      }
+    },
+    {
+      "id": "sd-012",
+      "cls": "same_colour_diff_category",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both blue; outerwear and a bottom.",
+      "a": {
+        "name": "Blue quilted parka",
+        "category": "outerwear",
+        "subcategory": "parka",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Blue quilted parka in polyester with a hood, a fur-trimmed hood edge and insulated sleeves.",
+        "embeddingText": "Blue quilted parka · outerwear · parka · blue · #2f5d9e · solid · polyester · Blue quilted parka in polyester with a hood, a fur-trimmed hood edge and insulated sleeves."
+      },
+      "b": {
+        "name": "Blue denim jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Blue jeans in denim with a straight leg and classic five-pocket styling.",
+        "embeddingText": "Blue denim jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Blue jeans in denim with a straight leg and classic five-pocket styling."
+      }
+    },
+    {
+      "id": "rn-001",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Smart-casual outfit partners: shirt and trousers, different colours, different roles.",
+      "a": {
+        "name": "White Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "White shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "White Oxford shirt · top · shirt · white · #f4f4f0 · solid · cotton · White shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Navy slim chinos",
+        "category": "bottom",
+        "subcategory": "chinos",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Slim navy chinos in stretch cotton twill with side pockets and a slim tapered leg.",
+        "embeddingText": "Navy slim chinos · bottom · chinos · navy · #1f2a44 · solid · cotton · Slim navy chinos in stretch cotton twill with side pockets and a slim tapered leg."
+      }
+    },
+    {
+      "id": "rn-002",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Casual layered outfit: striped tee under a denim jacket.",
+      "a": {
+        "name": "Navy and white striped tee",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "T-shirt in cotton with navy and white horizontal stripes and a crew neck.",
+        "embeddingText": "Navy and white striped tee · top · T-shirt · navy · white · #1f2a44 · #f4f4f0 · striped · cotton · T-shirt in cotton with navy and white horizontal stripes and a crew neck."
+      },
+      "b": {
+        "name": "Light wash denim jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Light wash denim jacket with a pointed collar, two chest pockets and a button front.",
+        "embeddingText": "Light wash denim jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Light wash denim jacket with a pointed collar, two chest pockets and a button front."
+      }
+    },
+    {
+      "id": "rn-003",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Knitwear over tailored trousers in the same smart-casual register.",
+      "a": {
+        "name": "Cream lambswool jumper",
+        "category": "top",
+        "subcategory": "jumper",
+        "colours": {
+          "primary": "cream",
+          "secondary": [],
+          "hex": [
+            "#f0ead9"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Cream lambswool jumper · top · jumper · cream · #f0ead9 · solid · knit · wool"
+      },
+      "b": {
+        "name": "Navy tailored trousers",
+        "category": "bottom",
+        "subcategory": "trousers",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Tailored trousers in navy wool with a flat front, side pockets and a pressed crease.",
+        "embeddingText": "Navy tailored trousers · bottom · trousers · navy · #1f2a44 · solid · wool · Tailored trousers in navy wool with a flat front, side pockets and a pressed crease."
+      }
+    },
+    {
+      "id": "rn-004",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Accessory worn with an outerwear coat; a pairing, not a similarity.",
+      "a": {
+        "name": "Red wool scarf",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Pure new-wool scarf in red with fringed ends, generous 180 by 30 centimetre size.",
+        "embeddingText": "Red wool scarf · accessory · scarf · red · #a8202f · solid · wool · Pure new-wool scarf in red with fringed ends, generous 180 by 30 centimetre size."
+      },
+      "b": {
+        "name": "Camel wool coat",
+        "category": "outerwear",
+        "subcategory": "coat",
+        "colours": {
+          "primary": "camel",
+          "secondary": [],
+          "hex": [
+            "#c39a63"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Camel wool coat with a notch lapel, long sleeves and a straight hem.",
+        "embeddingText": "Camel wool coat · outerwear · coat · camel · #c39a63 · solid · wool · Camel wool coat with a notch lapel, long sleeves and a straight hem."
+      }
+    },
+    {
+      "id": "rn-005",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Light summer outfit: blouse with a skirt.",
+      "a": {
+        "name": "White draped blouse",
+        "category": "top",
+        "subcategory": "blouse",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "viscose blend",
+        "description": "White short-sleeve blouse in viscose blend with a wide neckline and a draped waist.",
+        "embeddingText": "White draped blouse · top · blouse · white · #f4f4f0 · solid · viscose blend · White short-sleeve blouse in viscose blend with a wide neckline and a draped waist."
+      },
+      "b": {
+        "name": "Beige A-line skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "A-line skirt in beige polyester, sitting at the natural waist and falling above the knee.",
+        "embeddingText": "Beige A-line skirt · bottom · skirt · beige · #d9cbb3 · solid · polyester · A-line skirt in beige polyester, sitting at the natural waist and falling above the knee."
+      }
+    },
+    {
+      "id": "rn-006",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Loungewear outfit partners, deliberately mismatched colours.",
+      "a": {
+        "name": "Navy cotton T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [],
+          "hex": [
+            "#1f2a44"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Crew-neck T-shirt in navy cotton with short sleeves and a regular fit.",
+        "embeddingText": "Navy cotton T-shirt · top · T-shirt · navy · #1f2a44 · solid · cotton · Crew-neck T-shirt in navy cotton with short sleeves and a regular fit."
+      },
+      "b": {
+        "name": "Grey sweatpants",
+        "category": "bottom",
+        "subcategory": "joggers",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Joggers in grey cotton fleece with an elastic waist, drawcords and cuffed ankles.",
+        "embeddingText": "Grey sweatpants · bottom · joggers · grey · #8f8f8f · solid · cotton · Joggers in grey cotton fleece with an elastic waist, drawcords and cuffed ankles."
+      }
+    },
+    {
+      "id": "rn-007",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Minimal evening outfit: tank with tailored trousers.",
+      "a": {
+        "name": "White ribbed tank top",
+        "category": "top",
+        "subcategory": "tank top",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "White ribbed tank top in cotton with a scoop neckline and a fitted cropped body.",
+        "embeddingText": "White ribbed tank top · top · tank top · white · #f4f4f0 · solid · cotton · White ribbed tank top in cotton with a scoop neckline and a fitted cropped body."
+      },
+      "b": {
+        "name": "Black tailored trousers",
+        "category": "bottom",
+        "subcategory": "trousers",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Tailored trousers in black wool with a flat front, side pockets and a pressed crease.",
+        "embeddingText": "Black tailored trousers · bottom · trousers · black · #1c1c1c · solid · wool · Tailored trousers in black wool with a flat front, side pockets and a pressed crease."
+      }
+    },
+    {
+      "id": "rn-008",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Casual streetwear outfit: jacket with trainers.",
+      "a": {
+        "name": "Green bomber jacket",
+        "category": "outerwear",
+        "subcategory": "bomber jacket",
+        "colours": {
+          "primary": "green",
+          "secondary": [],
+          "hex": [
+            "#2f5d43"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Green bomber jacket in polyester with ribbed cuffs, a zip front and two welt pockets.",
+        "embeddingText": "Green bomber jacket · outerwear · bomber jacket · green · #2f5d43 · solid · polyester · Green bomber jacket in polyester with ribbed cuffs, a zip front and two welt pockets."
+      },
+      "b": {
+        "name": "White low-top trainers",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "synthetic",
+        "description": "Low-top trainers in white synthetic with a rubber sole and white laces.",
+        "embeddingText": "White low-top trainers · shoes · trainers · white · #f4f4f0 · solid · synthetic · Low-top trainers in white synthetic with a rubber sole and white laces."
+      }
+    },
+    {
+      "id": "rn-009",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Office outfit: shirt with tailored trousers.",
+      "a": {
+        "name": "Blue Oxford shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Blue shirt in cotton Oxford cloth with a button-down collar and long sleeves.",
+        "embeddingText": "Blue Oxford shirt · top · shirt · blue · #2f5d9e · solid · cotton · Blue shirt in cotton Oxford cloth with a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Grey tailored trousers",
+        "category": "bottom",
+        "subcategory": "trousers",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Tailored trousers in grey wool with a flat front, side pockets and a pressed crease.",
+        "embeddingText": "Grey tailored trousers · bottom · trousers · grey · #8f8f8f · solid · wool · Tailored trousers in grey wool with a flat front, side pockets and a pressed crease."
+      }
+    },
+    {
+      "id": "rn-010",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "A dress and its legwear; a styling dependency, not a similarity.",
+      "a": {
+        "name": "Burgundy midi dress",
+        "category": "dress",
+        "subcategory": "midi dress",
+        "colours": {
+          "primary": "burgundy",
+          "secondary": [],
+          "hex": [
+            "#5c1a2b"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Midi dress in burgundy polyester with short sleeves, a round neck and a belted waist.",
+        "embeddingText": "Burgundy midi dress · dress · midi dress · burgundy · #5c1a2b · solid · polyester · Midi dress in burgundy polyester with short sleeves, a round neck and a belted waist."
+      },
+      "b": {
+        "name": "Black opaque tights",
+        "category": "bottom",
+        "subcategory": "tights",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "polyester",
+        "description": "Opaque black tights in polyester with a reinforced waistband and 40 denier opacity.",
+        "embeddingText": "Black opaque tights · bottom · tights · black · #1c1c1c · solid · polyester · Opaque black tights in polyester with a reinforced waistband and 40 denier opacity."
+      }
+    },
+    {
+      "id": "rn-011",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Weekend outfit: suede jacket with jeans.",
+      "a": {
+        "name": "Tan suede jacket",
+        "category": "outerwear",
+        "subcategory": "suede jacket",
+        "colours": {
+          "primary": "tan",
+          "secondary": [],
+          "hex": [
+            "#b98b5e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "suede",
+        "description": "Tan suede jacket with a pointed collar, a zip front and two chest pockets.",
+        "embeddingText": "Tan suede jacket · outerwear · suede jacket · tan · #b98b5e · solid · suede · Tan suede jacket with a pointed collar, a zip front and two chest pockets."
+      },
+      "b": {
+        "name": "Mid-indigo mom jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "High-rise mom jeans in mid-indigo denim with a relaxed straight leg and a cropped hem.",
+        "embeddingText": "Mid-indigo mom jeans · bottom · jeans · blue · #2f5d9e · solid · denim · High-rise mom jeans in mid-indigo denim with a relaxed straight leg and a cropped hem."
+      }
+    },
+    {
+      "id": "rn-012",
+      "cls": "related_not_duplicate",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Winter accessory worn with a winter coat.",
+      "a": {
+        "name": "Pink lambswool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "pink",
+          "secondary": [],
+          "hex": [
+            "#d9a3ae"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Pink lambswool beanie · headwear · beanie · pink · #d9a3ae · solid · knit · wool"
+      },
+      "b": {
+        "name": "Grey wool coat",
+        "category": "outerwear",
+        "subcategory": "coat",
+        "colours": {
+          "primary": "grey",
+          "secondary": [],
+          "hex": [
+            "#8f8f8f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Grey wool coat with a notch lapel, long sleeves and a straight hem.",
+        "embeddingText": "Grey wool coat · outerwear · coat · grey · #8f8f8f · solid · wool · Grey wool coat with a notch lapel, long sleeves and a straight hem."
+      }
+    },
+    {
+      "id": "hn-001",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Denim jacket vs denim jeans: same material, same wash, same colour, different garment class.",
+      "changedAttributes": [
+        "category: outerwear -> bottom",
+        "subcategory: denim jacket -> jeans"
+      ],
+      "a": {
+        "name": "Light wash denim jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Light wash denim jacket with a pointed collar, two chest pockets and a button front.",
+        "embeddingText": "Light wash denim jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Light wash denim jacket with a pointed collar, two chest pockets and a button front."
+      },
+      "b": {
+        "name": "Light wash denim jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Light wash denim jeans with a straight leg and classic five-pocket styling.",
+        "embeddingText": "Light wash denim jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Light wash denim jeans with a straight leg and classic five-pocket styling."
+      }
+    },
+    {
+      "id": "hn-002",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Same pair of concepts as hn-001 with the wash swapped, to break any wash-led shortcut.",
+      "changedAttributes": [
+        "category: bottom -> outerwear",
+        "subcategory: jeans -> denim jacket"
+      ],
+      "a": {
+        "name": "Dark wash denim jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Dark wash denim jeans in a slim leg with classic five-pocket styling.",
+        "embeddingText": "Dark wash denim jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Dark wash denim jeans in a slim leg with classic five-pocket styling."
+      },
+      "b": {
+        "name": "Dark wash denim trucker jacket",
+        "category": "outerwear",
+        "subcategory": "denim jacket",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Dark wash denim trucker jacket with a pointed collar and two buttoned chest pockets.",
+        "embeddingText": "Dark wash denim trucker jacket · outerwear · denim jacket · blue · #2f5d9e · solid · denim · Dark wash denim trucker jacket with a pointed collar and two buttoned chest pockets."
+      }
+    },
+    {
+      "id": "hn-003",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Denim dungarees vs denim jeans: same material and colour, entirely different garment.",
+      "changedAttributes": [
+        "subcategory: dungarees -> jeans"
+      ],
+      "a": {
+        "name": "Indigo denim dungarees",
+        "category": "bottom",
+        "subcategory": "dungarees",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Indigo denim dungarees with adjustable shoulder straps, a chest pocket and side pockets.",
+        "embeddingText": "Indigo denim dungarees · bottom · dungarees · blue · #2f5d9e · solid · denim · Indigo denim dungarees with adjustable shoulder straps, a chest pocket and side pockets."
+      },
+      "b": {
+        "name": "Indigo denim jeans",
+        "category": "bottom",
+        "subcategory": "jeans",
+        "colours": {
+          "primary": "blue",
+          "secondary": [],
+          "hex": [
+            "#2f5d9e"
+          ]
+        },
+        "pattern": "solid",
+        "material": "denim",
+        "description": "Indigo denim jeans with a straight leg and classic five-pocket styling.",
+        "embeddingText": "Indigo denim jeans · bottom · jeans · blue · #2f5d9e · solid · denim · Indigo denim jeans with a straight leg and classic five-pocket styling."
+      }
+    },
+    {
+      "id": "hn-004",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both blue cotton men's shirts; the print and the sleeve length are different garments.",
+      "changedAttributes": [
+        "pattern: check -> floral",
+        "subcategory: shirt -> short-sleeve shirt"
+      ],
+      "a": {
+        "name": "Blue check shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "black",
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#1c1c1c",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "check",
+        "material": "cotton",
+        "description": "Blue, black and white checked long-sleeve button-down shirt in cotton.",
+        "embeddingText": "Blue check shirt · top · shirt · blue · black · white · #2f5d9e · #1c1c1c · #f4f4f0 · check · cotton · Blue, black and white checked long-sleeve button-down shirt in cotton."
+      },
+      "b": {
+        "name": "Blue floral shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "floral",
+        "material": "cotton",
+        "description": "Relaxed short-sleeve blue shirt in cotton with a white tropical leaf print.",
+        "embeddingText": "Blue floral shirt · top · shirt · blue · white · #2f5d9e · #f4f4f0 · floral · cotton · Relaxed short-sleeve blue shirt in cotton with a white tropical leaf print."
+      }
+    },
+    {
+      "id": "hn-005",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Both black outerwear with 'jacket' in the name; completely different garment.",
+      "changedAttributes": [
+        "subcategory: biker jacket -> coat",
+        "material: faux leather -> wool"
+      ],
+      "a": {
+        "name": "Black biker jacket",
+        "category": "outerwear",
+        "subcategory": "biker jacket",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "faux leather",
+        "description": "Black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets.",
+        "embeddingText": "Black biker jacket · outerwear · biker jacket · black · #1c1c1c · solid · faux leather · Black faux-leather biker jacket with an asymmetric zip, lapels and zippered pockets."
+      },
+      "b": {
+        "name": "Black wool overcoat",
+        "category": "outerwear",
+        "subcategory": "coat",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "Full-length black wool overcoat with a notch lapel and a concealed button front.",
+        "embeddingText": "Black wool overcoat · outerwear · coat · black · #1c1c1c · solid · wool · Full-length black wool overcoat with a notch lapel and a concealed button front."
+      }
+    },
+    {
+      "id": "hn-006",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Same material word and both unstructured, but one is footwear and one is a bag.",
+      "changedAttributes": [
+        "category: shoes -> bag",
+        "subcategory: trainers -> tote bag"
+      ],
+      "a": {
+        "name": "Canvas trainers",
+        "category": "shoes",
+        "subcategory": "trainers",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Low-top trainers in white canvas with a vulcanised rubber sole and white laces.",
+        "embeddingText": "Canvas trainers · shoes · trainers · white · #f4f4f0 · solid · canvas · Low-top trainers in white canvas with a vulcanised rubber sole and white laces."
+      },
+      "b": {
+        "name": "Canvas tote bag",
+        "category": "bag",
+        "subcategory": "tote bag",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "canvas",
+        "description": "Tote bag in natural cotton canvas with reinforced handles and an open top.",
+        "embeddingText": "Canvas tote bag · bag · tote bag · beige · #d9cbb3 · solid · canvas · Tote bag in natural cotton canvas with reinforced handles and an open top."
+      }
+    },
+    {
+      "id": "hn-007",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Identical material and colour words; a bag and a belt are not near neighbours.",
+      "changedAttributes": [
+        "category: bag -> accessory",
+        "subcategory: shoulder bag -> belt"
+      ],
+      "a": {
+        "name": "Black leather shoulder bag",
+        "category": "bag",
+        "subcategory": "shoulder bag",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Adult women's black leather shoulder bag with two top handles and silver-tone hardware.",
+        "embeddingText": "Black leather shoulder bag · bag · shoulder bag · black · #1c1c1c · solid · leather · Adult women's black leather shoulder bag with two top handles and silver-tone hardware."
+      },
+      "b": {
+        "name": "Black leather belt",
+        "category": "accessory",
+        "subcategory": "belt",
+        "colours": {
+          "primary": "black",
+          "secondary": [],
+          "hex": [
+            "#1c1c1c"
+          ]
+        },
+        "pattern": "solid",
+        "material": "leather",
+        "description": "Black leather belt with a 35 millimetre silver buckle and punched holes.",
+        "embeddingText": "Black leather belt · accessory · belt · black · #1c1c1c · solid · leather · Black leather belt with a 35 millimetre silver buckle and punched holes."
+      }
+    },
+    {
+      "id": "hn-008",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Identical colours and identical pattern word; a shirt and a scarf.",
+      "changedAttributes": [
+        "category: top -> accessory",
+        "subcategory: shirt -> scarf"
+      ],
+      "a": {
+        "name": "Blue and white striped shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Shirt in cotton with blue and white vertical stripes, a button-down collar and long sleeves.",
+        "embeddingText": "Blue and white striped shirt · top · shirt · blue · white · #2f5d9e · #f4f4f0 · striped · cotton · Shirt in cotton with blue and white vertical stripes, a button-down collar and long sleeves."
+      },
+      "b": {
+        "name": "Blue and white striped scarf",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "blue",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#2f5d9e",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "wool",
+        "description": "A blue and white striped scarf woven from wool with knotted fringe at both ends.",
+        "embeddingText": "Blue and white striped scarf · accessory · scarf · blue · white · #2f5d9e · #f4f4f0 · striped · wool · A blue and white striped scarf woven from wool with knotted fringe at both ends."
+      }
+    },
+    {
+      "id": "hn-009",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Same fabric, same check, same colours; skirt vs shirt.",
+      "changedAttributes": [
+        "category: bottom -> top",
+        "subcategory: skirt -> shirt"
+      ],
+      "a": {
+        "name": "Checked wool skirt",
+        "category": "bottom",
+        "subcategory": "skirt",
+        "colours": {
+          "primary": "brown",
+          "secondary": [
+            "cream"
+          ],
+          "hex": [
+            "#5b3a26",
+            "#f0ead9"
+          ]
+        },
+        "pattern": "check",
+        "material": "wool",
+        "description": "A-line skirt in brown and cream checked wool, sitting at the natural waist.",
+        "embeddingText": "Checked wool skirt · bottom · skirt · brown · cream · #5b3a26 · #f0ead9 · check · wool · A-line skirt in brown and cream checked wool, sitting at the natural waist."
+      },
+      "b": {
+        "name": "Checked wool shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "brown",
+          "secondary": [
+            "cream"
+          ],
+          "hex": [
+            "#5b3a26",
+            "#f0ead9"
+          ]
+        },
+        "pattern": "check",
+        "material": "wool",
+        "description": "Long-sleeve shirt in brown and cream checked wool with a button-down collar.",
+        "embeddingText": "Checked wool shirt · top · shirt · brown · cream · #5b3a26 · #f0ead9 · check · wool · Long-sleeve shirt in brown and cream checked wool with a button-down collar."
+      }
+    },
+    {
+      "id": "hn-010",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Contains the word 'shirt' and is otherwise near-identical text; a dress, not a shirt.",
+      "changedAttributes": [
+        "category: top -> dress",
+        "subcategory: shirt -> shirt dress"
+      ],
+      "a": {
+        "name": "Cotton shirt dress",
+        "category": "dress",
+        "subcategory": "shirt dress",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Shirt dress in white cotton with a button front, a collar and a belted waist.",
+        "embeddingText": "Cotton shirt dress · dress · shirt dress · white · #f4f4f0 · solid · cotton · Shirt dress in white cotton with a button front, a collar and a belted waist."
+      },
+      "b": {
+        "name": "White cotton shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "White button-down shirt in cotton with a buttoned collar and long sleeves.",
+        "embeddingText": "White cotton shirt · top · shirt · white · #f4f4f0 · solid · cotton · White button-down shirt in cotton with a buttoned collar and long sleeves."
+      }
+    },
+    {
+      "id": "hn-011",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Identical colour and material; headwear vs accessory.",
+      "changedAttributes": [
+        "category: accessory -> headwear",
+        "subcategory: scarf -> beanie"
+      ],
+      "a": {
+        "name": "Red wool scarf",
+        "category": "accessory",
+        "subcategory": "scarf",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "wool",
+        "description": "A red scarf woven from wool with knotted fringe at both ends.",
+        "embeddingText": "Red wool scarf · accessory · scarf · red · #a8202f · solid · wool · A red scarf woven from wool with knotted fringe at both ends."
+      },
+      "b": {
+        "name": "Red wool beanie",
+        "category": "headwear",
+        "subcategory": "beanie",
+        "colours": {
+          "primary": "red",
+          "secondary": [],
+          "hex": [
+            "#a8202f"
+          ]
+        },
+        "pattern": "solid",
+        "material": "knit",
+        "description": "wool",
+        "embeddingText": "Red wool beanie · headwear · beanie · red · #a8202f · solid · knit · wool"
+      }
+    },
+    {
+      "id": "hn-012",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Same stripes, same fabric, same colours; a tee and a sweatshirt.",
+      "changedAttributes": [
+        "subcategory: T-shirt -> sweatshirt",
+        "garment: short-sleeve -> hooded"
+      ],
+      "a": {
+        "name": "Striped cotton T-shirt",
+        "category": "top",
+        "subcategory": "T-shirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Crew-neck T-shirt in cotton with navy and white horizontal stripes.",
+        "embeddingText": "Striped cotton T-shirt · top · T-shirt · navy · white · #1f2a44 · #f4f4f0 · striped · cotton · Crew-neck T-shirt in cotton with navy and white horizontal stripes."
+      },
+      "b": {
+        "name": "Striped cotton hoodie",
+        "category": "top",
+        "subcategory": "sweatshirt",
+        "colours": {
+          "primary": "navy",
+          "secondary": [
+            "white"
+          ],
+          "hex": [
+            "#1f2a44",
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "striped",
+        "material": "cotton",
+        "description": "Hooded sweatshirt in cotton with navy and white stripes, a kangaroo pocket and drawcords.",
+        "embeddingText": "Striped cotton hoodie · top · sweatshirt · navy · white · #1f2a44 · #f4f4f0 · striped · cotton · Hooded sweatshirt in cotton with navy and white stripes, a kangaroo pocket and drawcords."
+      }
+    },
+    {
+      "id": "hn-013",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Long-sleeve cotton white in both; the garment class differs.",
+      "changedAttributes": [
+        "category: top -> dress"
+      ],
+      "a": {
+        "name": "Long-sleeve shirt",
+        "category": "top",
+        "subcategory": "shirt",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Long-sleeve button-down shirt in white cotton with a relaxed fit and a buttoned collar.",
+        "embeddingText": "Long-sleeve shirt · top · shirt · white · #f4f4f0 · solid · cotton · Long-sleeve button-down shirt in white cotton with a relaxed fit and a buttoned collar."
+      },
+      "b": {
+        "name": "Long-sleeve shirt dress",
+        "category": "dress",
+        "subcategory": "shirt dress",
+        "colours": {
+          "primary": "white",
+          "secondary": [],
+          "hex": [
+            "#f4f4f0"
+          ]
+        },
+        "pattern": "solid",
+        "material": "cotton",
+        "description": "Long-sleeve shirt dress in white cotton with a collar and a belted waist.",
+        "embeddingText": "Long-sleeve shirt dress · dress · shirt dress · white · #f4f4f0 · solid · cotton · Long-sleeve shirt dress in white cotton with a collar and a belted waist."
+      }
+    },
+    {
+      "id": "hn-014",
+      "cls": "hard_negative",
+      "isDuplicate": false,
+      "isStronglySimilar": false,
+      "note": "Same fabric and colour, both bottoms; a leg-length difference, not a similar item.",
+      "changedAttributes": [
+        "subcategory: trousers -> shorts"
+      ],
+      "a": {
+        "name": "Linen trousers",
+        "category": "bottom",
+        "subcategory": "trousers",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "linen",
+        "description": "Wide-leg trousers in beige linen with a drawstring waist and side pockets.",
+        "embeddingText": "Linen trousers · bottom · trousers · beige · #d9cbb3 · solid · linen · Wide-leg trousers in beige linen with a drawstring waist and side pockets."
+      },
+      "b": {
+        "name": "Linen shorts",
+        "category": "bottom",
+        "subcategory": "shorts",
+        "colours": {
+          "primary": "beige",
+          "secondary": [],
+          "hex": [
+            "#d9cbb3"
+          ]
+        },
+        "pattern": "solid",
+        "material": "linen",
+        "description": "Drawstring shorts in beige linen with an elastic waist and side pockets.",
+        "embeddingText": "Linen shorts · bottom · shorts · beige · #d9cbb3 · solid · linen · Drawstring shorts in beige linen with an elastic waist and side pockets."
+      }
+    }
+  ]
+}
