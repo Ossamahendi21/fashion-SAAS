@@ -62,3 +62,6 @@ bench/extraction/.out/
 
 # Render benchmark artifacts (generated outputs and reports, never committed)
 bench/render/.out/
+
+# Detection benchmark artifacts (generated masks, boxes and reports, never committed)
+bench/detection/.out/

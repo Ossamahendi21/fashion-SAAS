@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "template": "a photo of {concept}",
+  "note": "Fixed before scoring. Per-concept embeddings are averaged with L2 normalization per Fitcheck category. Do not tune per-fixture.",
+  "groups": {
+    "top": ["shirt", "t-shirt", "blouse", "sweater", "hoodie"],
+    "bottom": ["pants", "trousers", "jeans", "shorts", "skirt"],
+    "outerwear": ["jacket", "coat", "blazer", "cardigan"],
+    "dress": ["dress", "gown", "one-piece dress"],
+    "shoes": ["shoes", "sneakers", "boots", "sandals", "heels"],
+    "accessory": ["belt", "scarf", "jewelry", "sunglasses", "fashion accessory"],
+    "bag": ["handbag", "backpack", "tote bag", "purse"],
+    "headwear": ["hat", "cap", "beanie", "headwear"]
+  }
+}

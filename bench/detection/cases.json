@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "fixtures": {
+    "single-top": { "file": "../extraction/.out/fixtures/light-background.png", "prompts": ["t-shirt"] },
+    "dress": { "file": "../extraction/.out/fixtures/dark-background.png", "prompts": ["dress"] },
+    "patterned": { "file": "../extraction/.out/fixtures/patterned-garment.png", "prompts": ["t-shirt"] },
+    "jacket": { "file": "../extraction/.out/fixtures/dark-garment.png", "prompts": ["jacket"] },
+    "worn-dress": { "file": "../extraction/.out/fixtures/worn-on-body.png", "prompts": ["dress"] },
+    "occluded-hoodie": { "file": "../extraction/.out/fixtures/occluded.png", "prompts": ["hoodie"] },
+    "shoe": { "file": "../extraction/.out/fixtures/accessory-shoe.png", "prompts": ["sneaker"] },
+    "pants": { "file": "fixtures/pants-bottom.png", "prompts": ["pants"] },
+    "bag": { "file": "fixtures/accessory-bag.png", "prompts": ["bag"] },
+    "multi-outfit": { "file": "fixtures/multi-outfit.png", "prompts": ["t-shirt", "pants"] }
+  },
+  "reference": {
+    "single-top": { "items": [{ "category": "top", "primary": "blue", "pattern": "solid" }] },
+    "dress": { "items": [{ "category": "dress", "primary": "gold", "pattern": "solid" }] },
+    "patterned": { "items": [{ "category": "top", "primary": "white", "pattern": "striped" }] },
+    "jacket": { "items": [{ "category": "outerwear", "primary": "black", "pattern": "solid" }] },
+    "worn-dress": { "items": [{ "category": "dress", "primary": "teal", "pattern": "solid" }] },
+    "occluded-hoodie": { "items": [{ "category": "top", "primary": "red", "pattern": "solid" }] },
+    "shoe": { "items": [{ "category": "shoes", "primary": "white", "pattern": "solid" }] },
+    "pants": { "items": [{ "category": "bottom", "primary": "blue", "pattern": "solid" }] },
+    "bag": { "items": [{ "category": "bag", "primary": "brown", "pattern": "solid" }] },
+    "multi-outfit": { "items": [
+      { "category": "top", "primary": "blue", "pattern": "solid" },
+      { "category": "bottom", "primary": "blue", "pattern": "solid" }
+    ] }
+  },
+  "expectedBoxes": {
+    "pants-bottom": [[750, 500, 1383, 1833]],
+    "accessory-bag": [[750, 545, 1385, 1625]],
+    "multi-outfit": [[225, 542, 816, 1333], [1250, 875, 1583, 1792]]
+  }
+}
