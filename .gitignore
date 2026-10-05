@@ -69,5 +69,8 @@ bench/detection/.out/
 # Embedding benchmark artifacts (generated scores, vectors and reports, never committed)
 bench/embeddings/.out/
 
+# Stylist benchmark artifacts (generated model traces and reports, never committed)
+bench/stylist/.out/
+
 __pycache__/
 *.py[cod]
