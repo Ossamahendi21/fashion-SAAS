@@ -423,3 +423,25 @@ test("the input state object is never mutated", () => {
   transitionStylistState(rec, { type: "PROPOSALS_READY", candidates: cand(1), now: 99 });
   assert.equal(JSON.stringify(rec), snapshot);
 });
+
+// --- session/state serialization (C4 final gate) ----------------------------------------------
+
+test("EMPTY_STYLIST_STATE is the neutral, JSON-serializable initial state", () => {
+  assert.equal(EMPTY_STYLIST_STATE.stage, "IDLE");
+  assert.deepEqual(EMPTY_STYLIST_STATE.candidates, []);
+  assert.equal(EMPTY_STYLIST_STATE.quote, null);
+  assert.equal(EMPTY_STYLIST_STATE.approved, false);
+  assert.equal(EMPTY_STYLIST_STATE.renderJobId, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(EMPTY_STYLIST_STATE)), EMPTY_STYLIST_STATE);
+});
+
+test("a driven C2 state round-trips through JSON with stage, quote and approval intact", () => {
+  const approved = ok(transitionStylistState(driveTo("AWAITING_APPROVAL", 100), { type: "APPROVED", now: 150 }));
+  const roundTripped = JSON.parse(JSON.stringify(approved));
+
+  assert.deepEqual(roundTripped, approved);
+  assert.equal(roundTripped.stage, "AWAITING_APPROVAL");
+  assert.equal(roundTripped.approved, true);
+  assert.equal(roundTripped.quote.credits, 10);
+  assert.equal(roundTripped.quote.outfitIds.length, 2);
+});
