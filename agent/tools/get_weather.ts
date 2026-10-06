@@ -1,43 +1,8 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-
-const GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search";
-const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
-
-type GeocodeResponse = {
-  results?: { name: string; latitude: number; longitude: number; country?: string; admin1?: string }[];
-};
-
-type ForecastResponse = {
-  daily?: {
-    time?: string[];
-    temperature_2m_max?: (number | null)[];
-    temperature_2m_min?: (number | null)[];
-    precipitation_probability_max?: (number | null)[];
-  };
-  daily_units?: Record<string, string>;
-  timezone?: string;
-};
+import { addDays, fetchDailyForecast, geocode, isoDate } from "../lib/open-meteo";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-function isoDate(offsetDays = 0): string {
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() + offsetDays);
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(date: string, days: number): string {
-  const next = new Date(`${date}T00:00:00Z`);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next.toISOString().slice(0, 10);
-}
-
-async function fetchJson<T>(url: string, what: string): Promise<T> {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error(`${what} lookup failed (${response.status}).`);
-  return (await response.json()) as T;
-}
 
 export default defineTool({
   description:
@@ -51,11 +16,7 @@ export default defineTool({
   }),
   label: { start: ({ place }) => `Checking the weather in ${place}` },
   async execute({ place, date, days }) {
-    const geocode = await fetchJson<GeocodeResponse>(
-      `${GEOCODE_URL}?name=${encodeURIComponent(place)}&count=1&language=en&format=json`,
-      "Place",
-    );
-    const location = geocode.results?.[0];
+    const location = await geocode(place);
     if (!location) {
       return {
         found: false as const,
@@ -66,12 +27,7 @@ export default defineTool({
 
     const startDate = date ?? isoDate();
     const endDate = addDays(startDate, Math.max(1, days ?? 1) - 1);
-    const forecast = await fetchJson<ForecastResponse>(
-      `${FORECAST_URL}?latitude=${location.latitude}&longitude=${location.longitude}` +
-        `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
-        `&timezone=auto&start_date=${startDate}&end_date=${endDate}`,
-      "Forecast",
-    );
+    const forecast = await fetchDailyForecast(location.latitude, location.longitude, startDate, endDate);
 
     const daily = forecast.daily;
     const dates = daily?.time ?? [];
