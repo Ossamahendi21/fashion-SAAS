@@ -21,6 +21,7 @@ import type * as ai_rendering from "../ai/rendering.js";
 import type * as avatars from "../avatars.js";
 import type * as credits from "../credits.js";
 import type * as demoWardrobe from "../demoWardrobe.js";
+import type * as dev_c6 from "../dev/c6.js";
 import type * as dev_smoke from "../dev/smoke.js";
 import type * as embeddingBackfill from "../embeddingBackfill.js";
 import type * as embeddingBackfillInternal from "../embeddingBackfillInternal.js";
@@ -91,6 +92,7 @@ declare const fullApi: ApiFromModules<{
   avatars: typeof avatars;
   credits: typeof credits;
   demoWardrobe: typeof demoWardrobe;
+  "dev/c6": typeof dev_c6;
   "dev/smoke": typeof dev_smoke;
   embeddingBackfill: typeof embeddingBackfill;
   embeddingBackfillInternal: typeof embeddingBackfillInternal;

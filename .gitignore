@@ -72,5 +72,8 @@ bench/embeddings/.out/
 # Stylist benchmark artifacts (generated model traces and reports, never committed)
 bench/stylist/.out/
 
+# C6 zero-model E2E trace (generated JSON report; kept apart from the fixture-guarded .out/)
+bench/stylist/.c6-out/
+
 __pycache__/
 *.py[cod]
