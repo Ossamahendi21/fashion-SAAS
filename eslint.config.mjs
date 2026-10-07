@@ -15,7 +15,7 @@ const eslintConfig = defineConfig([
     "convex/_generated/**",
     ".claude/**",
     "docs/**",
-    ".eve/**",
+    "**/.eve/**",
     ".output/**",
     ".convex/**",
     // OpenWear is a separate Plasmo/React project with its own package.json and
