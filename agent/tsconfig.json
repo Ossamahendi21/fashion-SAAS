@@ -12,6 +12,6 @@
     "isolatedModules": true,
     "types": ["node"]
   },
-  "include": ["**/*.ts"],
+  "include": ["**/*.ts", "../agent-deterministic/**/*.ts"],
   "exclude": ["node_modules"]
 }
