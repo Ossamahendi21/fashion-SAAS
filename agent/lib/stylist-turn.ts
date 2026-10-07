@@ -8,6 +8,7 @@ import type { Formality } from "../../convex/shared/wardrobe";
 import { api, convex, convexErrorMessage, serviceArgs, type Id } from "./convex";
 import { runStylistTurn, turnNeedsApproval, type StylistPorts, type StylistTurnResult } from "./stylist-orchestrator";
 import { mergeStylistTurn, type StylistDateRef, type StylistTurnInput } from "./stylist-plan";
+import { formatStylistResponse, responseOutcomeFromTurn } from "./stylist-response";
 import type { OutfitSlot, WardrobeItem } from "./stylist-rank";
 import { readStylistState, writeStylistState } from "./stylist-session-state";
 import { samePrincipal } from "./session-auth";
@@ -31,6 +32,12 @@ export type StylistTurnOutput = {
   kind: StylistTurnResult["kind"];
   stage: StylistThreadState["stage"];
   summary: string;
+  /**
+   * The trusted user-facing reply produced by the deterministic formatter from the real outcome.
+   * Exposed so a transport layer can echo the exact trusted text without re-running the turn (which
+   * would duplicate its side effects). It is never derived from model or user input.
+   */
+  response: string;
 };
 
 const REFERENT_PERIODS = ["today", "tonight", "tomorrow", "dayAfterTomorrow", "weekend"] as const;
@@ -46,7 +53,7 @@ const referentSchema = z.union([
   z.object({ kind: z.literal("ordinal"), position: z.number().int().min(1) }),
 ]);
 
-const inputSchema = z.object({
+export const stylistTurnInputSchema = z.object({
   turn: z.object({
     intent: z.enum(["recommend", "refine", "render", "save", "price", "gaps", "chat"]).optional(),
     brief: z.string().nullable().optional(),
@@ -65,14 +72,14 @@ const inputSchema = z.object({
   perOutfit: z.number().int().min(1).max(4).optional(),
 });
 
-type Input = z.infer<typeof inputSchema>;
+type Input = z.infer<typeof stylistTurnInputSchema>;
 
 export default defineTool({
   description:
     "Run one stylist turn: recommend or refine outfits, price or render one, save it, or report " +
     "wardrobe gaps. Pass the normalised turn; the tool keeps the conversation's state itself. A " +
     "render turn is quoted and approved before anything is spent.",
-  inputSchema,
+  inputSchema: stylistTurnInputSchema,
   label: {
     start: () => "Working out your look",
     complete: (_input, output: StylistTurnOutput) => output.summary,
@@ -120,7 +127,7 @@ export default defineTool({
       approved: true,
     });
     writeStylistState(result.state);
-    return summarise(result);
+    return toStylistTurnOutput(result);
   },
 });
 
@@ -132,8 +139,13 @@ function referentOutfitId(state: StylistThreadState, turn: StylistTurnInput): st
   return plan.referent?.outfitId ?? null;
 }
 
-function summarise(result: StylistTurnResult): StylistTurnOutput {
-  return { kind: result.kind, stage: result.state.stage, summary: describe(result) };
+export function toStylistTurnOutput(result: StylistTurnResult): StylistTurnOutput {
+  return {
+    kind: result.kind,
+    stage: result.state.stage,
+    summary: describe(result),
+    response: formatStylistResponse(responseOutcomeFromTurn(result)),
+  };
 }
 
 function describe(result: StylistTurnResult): string {
