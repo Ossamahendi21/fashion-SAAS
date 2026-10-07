@@ -1,0 +1,11 @@
+{
+  "name": "fitcheck-eve-canary",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ai": "^7.0.116",
+    "eve": "^0.56.0",
+    "zod": "^4.6.5"
+  }
+}
