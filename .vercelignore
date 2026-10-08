@@ -13,3 +13,6 @@ artifacts
 verification
 *.tsbuildinfo
 coverage
+# The browser extension is a separate Plasmo project: never part of the Next.js
+# deployment. (Its .plasmo parcel cache alone exceeds Vercel's per-file limit.)
+extension/
