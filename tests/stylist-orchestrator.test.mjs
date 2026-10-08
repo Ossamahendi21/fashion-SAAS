@@ -91,6 +91,7 @@ test("a price turn quotes the REAL persisted outfit id, never a candidate key", 
     turn: { intent: "price", referent: { kind: "ordinal", position: 2 } },
     now: 2_000,
     ports,
+    renderEnabled: true,
   });
 
   assert.equal(priced.kind, "quote");
@@ -104,12 +105,26 @@ test("render without approval stops at AWAITING_APPROVAL; with approval it start
   const { result, ports, calls } = await recommendFirst(1);
   const turn = { intent: "render", referent: { kind: "current" } };
 
-  const gated = await runStylistTurn({ state: result.state, turn, now: 2_000, ports, approved: false });
+  const gated = await runStylistTurn({
+    state: result.state,
+    turn,
+    now: 2_000,
+    ports,
+    approved: false,
+    renderEnabled: true,
+  });
   assert.equal(gated.kind, "approvalRequired");
   assert.equal(gated.state.stage, "AWAITING_APPROVAL");
   assert.equal(calls.start.length, 0);
 
-  const started = await runStylistTurn({ state: result.state, turn, now: 3_000, ports, approved: true });
+  const started = await runStylistTurn({
+    state: result.state,
+    turn,
+    now: 3_000,
+    ports,
+    approved: true,
+    renderEnabled: true,
+  });
   assert.equal(started.kind, "renderStarted");
   assert.equal(started.state.stage, "RENDERING");
   assert.equal(started.jobId, "job-1");
@@ -127,6 +142,7 @@ test("quote blockers short-circuit a render into renderBlocked without advancing
     turn: { intent: "render", referent: { kind: "current" } },
     now: 2_000,
     ports: blockedPorts,
+    renderEnabled: true,
   });
 
   assert.equal(blocked.kind, "renderBlocked");
@@ -229,7 +245,7 @@ test("turnNeedsApproval is true only for a render that resolved a real referent"
 
   assert.equal(turnNeedsApproval(EMPTY_MACHINE_STATE, { intent: "recommend", occasion: "x" }), false);
   assert.equal(turnNeedsApproval(EMPTY_MACHINE_STATE, { intent: "render", referent: { kind: "current" } }), false);
-  assert.equal(turnNeedsApproval(result.state, { intent: "render", referent: { kind: "current" } }), true);
+  assert.equal(turnNeedsApproval(result.state, { intent: "render", referent: { kind: "current" } }, true), true);
   assert.equal(turnNeedsApproval(result.state, { intent: "render", referent: { kind: "ordinal", position: 9 } }), false);
 });
 
@@ -250,6 +266,7 @@ test("a render after the outfit is already saved raises instead of corrupting st
       turn: { intent: "render", referent: { kind: "current" } },
       now: 3_000,
       ports,
+      renderEnabled: true,
     }),
     (error) => error instanceof StylistOrchestrationError && error.code === "outOfSequence",
   );
@@ -306,6 +323,7 @@ test("price, save and render all follow the exact persisted id the compose port 
     turn: { intent: "price", referent: { kind: "current" } },
     now: 2_000,
     ports,
+    renderEnabled: true,
   });
   assert.deepEqual(priced.quote.outfitIds, ["oA"]);
   assert.equal(priced.plan.referent.outfitId, "oA");
@@ -325,6 +343,7 @@ test("price, save and render all follow the exact persisted id the compose port 
     now: 2_000,
     ports,
     approved: true,
+    renderEnabled: true,
   });
   assert.equal(started.kind, "renderStarted");
   assert.deepEqual(calls.start.at(-1).outfitIds, ["oA"]);
@@ -339,7 +358,7 @@ test("turnNeedsApproval is false for every intent except a resolved render", asy
   assert.equal(turnNeedsApproval(result.state, { intent: "gaps" }), false);
   assert.equal(turnNeedsApproval(result.state, { intent: "chat" }), false);
   assert.equal(turnNeedsApproval(result.state, { intent: "render" }), false);
-  assert.equal(turnNeedsApproval(result.state, { intent: "render", referent: { kind: "current" } }), true);
+  assert.equal(turnNeedsApproval(result.state, { intent: "render", referent: { kind: "current" } }, true), true);
 });
 
 test("a price turn is never gated and stamps the quote TTL", async () => {
@@ -351,6 +370,7 @@ test("a price turn is never gated and stamps the quote TTL", async () => {
     now: 2_000,
     ports,
     approved: false,
+    renderEnabled: true,
   });
 
   assert.equal(priced.kind, "quote");
@@ -363,13 +383,27 @@ test("a gated render quotes exactly once and spends nothing; resuming starts the
   const { result, ports, calls } = await recommendFirst(1);
   const turn = { intent: "render", referent: { kind: "current" } };
 
-  const gated = await runStylistTurn({ state: result.state, turn, now: 2_000, ports, approved: false });
+  const gated = await runStylistTurn({
+    state: result.state,
+    turn,
+    now: 2_000,
+    ports,
+    approved: false,
+    renderEnabled: true,
+  });
   assert.equal(gated.kind, "approvalRequired");
   assert.equal(gated.state.stage, "AWAITING_APPROVAL");
   assert.equal(calls.quote.length, 1);
   assert.equal(calls.start.length, 0);
 
-  const resumed = await runStylistTurn({ state: gated.state, turn, now: 3_000, ports, approved: true });
+  const resumed = await runStylistTurn({
+    state: gated.state,
+    turn,
+    now: 3_000,
+    ports,
+    approved: true,
+    renderEnabled: true,
+  });
   assert.equal(resumed.kind, "renderStarted");
   assert.equal(resumed.state.stage, "RENDERING");
   assert.equal(resumed.jobId, "job-1");
@@ -631,6 +665,7 @@ test("a referent intent inherits the previous referent once one is resolved", as
     turn: { intent: "price", referent: { kind: "current" } },
     now: 2_000,
     ports,
+    renderEnabled: true,
   });
   assert.notEqual(priced.plan.referent, null);
   assert.equal(priced.plan.referent.outfitId, "outfit-1");
@@ -643,7 +678,14 @@ test("a referent intent inherits the previous referent once one is resolved", as
 test("a 'render that' follow-up resolves a referent and is gated by approval", async () => {
   const { result, ports, calls } = await recommendFirst(1);
 
-  const gated = await runStylistTurn({ state: result.state, turn: { text: "render that" }, now: 2_000, ports, approved: false });
+  const gated = await runStylistTurn({
+    state: result.state,
+    turn: { text: "render that" },
+    now: 2_000,
+    ports,
+    approved: false,
+    renderEnabled: true,
+  });
 
   assert.equal(gated.kind, "approvalRequired");
   assert.equal(gated.state.stage, "AWAITING_APPROVAL");
@@ -676,6 +718,7 @@ test("a warmer refine invalidates the stored quote", async () => {
     turn: { intent: "price", referent: { kind: "current" } },
     now: 2_000,
     ports,
+    renderEnabled: true,
   });
   assert.equal(priced.state.stage, "QUOTED");
   assert.notEqual(priced.state.quote, null);
@@ -693,6 +736,7 @@ test("a warmer refine revokes a prior approval and its render start", async () =
     now: 2_000,
     ports,
     approved: true,
+    renderEnabled: true,
   });
   assert.equal(rendered.state.stage, "RENDERING");
   assert.equal(rendered.state.approved, true);
@@ -715,6 +759,7 @@ test("the trusted quote credits become authoritative and the render uses the exa
     ports,
     quality: "hq",
     perOutfit: 3,
+    renderEnabled: true,
   });
   assert.equal(priced.quote.credits, trustedCredits);
   assert.equal(priced.quote.quality, "hq");
@@ -729,6 +774,7 @@ test("the trusted quote credits become authoritative and the render uses the exa
     quality: "hq",
     perOutfit: 3,
     approved: true,
+    renderEnabled: true,
   });
   assert.equal(started.kind, "renderStarted");
   assert.deepEqual(renderPorts.calls.quote.at(-1), { outfitIds: ["outfit-1"], perOutfit: 3, quality: "hq" });

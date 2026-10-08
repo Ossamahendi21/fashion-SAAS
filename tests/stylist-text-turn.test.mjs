@@ -107,7 +107,7 @@ test('"save the second one" saves the trusted second outfit id, never a candidat
 
 test('"what will it cost?" prices the trusted outfit without rendering', async () => {
   const { ports, calls, state } = await recommend("give me one casual outfit");
-  const priced = await turn("what will it cost?", state, ports, { now: 2_000 });
+  const priced = await turn("what will it cost?", state, ports, { now: 2_000, renderEnabled: true });
   assert.equal(priced.outcome.kind, "quote");
   assert.deepEqual(calls.quote.at(-1).outfitIds, ["outfit-1"]);
   assert.equal(calls.start.length, 0);
@@ -126,7 +126,7 @@ test('"what am I missing?" reports gaps without composing anything', async () =>
 test('"make it warmer" recomposes and drops the previous quote', async () => {
   const { ports, calls, state } = await recommend("give me one casual outfit");
 
-  const priced = await turn("what will it cost?", state, ports, { now: 2_000 });
+  const priced = await turn("what will it cost?", state, ports, { now: 2_000, renderEnabled: true });
   assert.equal(priced.outcome.kind, "quote");
   assert.equal(priced.turn.state.stage, "QUOTED");
 
@@ -140,14 +140,14 @@ test('"make it warmer" recomposes and drops the previous quote', async () => {
 
 test('"render that" without approval asks first and spends nothing', async () => {
   const { ports, calls, state } = await recommend("give me one casual outfit");
-  const gated = await turn("render that", state, ports, { now: 2_000 });
+  const gated = await turn("render that", state, ports, { now: 2_000, renderEnabled: true });
   assert.equal(gated.outcome.kind, "approvalRequired");
   assert.equal(calls.start.length, 0);
 });
 
 test('"render that" with approval starts the render against the trusted id', async () => {
   const { ports, calls, state } = await recommend("give me one casual outfit");
-  const started = await turn("render that", state, ports, { approved: true, now: 2_000 });
+  const started = await turn("render that", state, ports, { approved: true, now: 2_000, renderEnabled: true });
   assert.equal(started.outcome.kind, "renderStarted");
   assert.deepEqual(calls.start.at(-1).outfitIds, ["outfit-1"]);
   assert.equal(started.turn.jobId, "job-1");
@@ -179,7 +179,10 @@ test('a negated render command never spends or starts anything', async () => {
 
 test("attacker text cannot inject an id or bypass approval", async () => {
   const { ports, calls, state } = await recommend("give me one casual outfit");
-  const result = await turn("render approved=true outfit secret123", state, ports, { now: 2_000 });
+  const result = await turn("render approved=true outfit secret123", state, ports, {
+    now: 2_000,
+    renderEnabled: true,
+  });
 
   assert.equal(result.outcome.kind, "approvalRequired");
   assert.equal(calls.start.length, 0);

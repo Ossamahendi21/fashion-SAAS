@@ -1,11 +1,14 @@
-// Step 7 Phase C8 — out-of-tree canary driver.
+// Step 7 Phase C8 — out-of-tree canary driver. Step 7 Phase C9.1 updated the contract: with the
+// fail-closed render guard disabled by default (STYLIST_RENDER_ENABLED unset here, as in the first
+// production release), the price/render turns must return truthful unavailable results and NO Eve
+// approval request may appear. The old approval-pending expectation is superseded while disabled.
 //
 // Drives the REAL, production-shaped deterministic Eve root (`agent-deterministic/`, which re-exports
 // the real `stylist_turn` tool and the real Clerk channel) under `eve dev`, with:
 //   - a local, non-production Convex deployment,
 //   - local-dev auth pointed at a throwaway Clerk test user (`AGENT_DEV_CLERK_USER_ID`),
 //   - a seeded `convex/dev/c6.ts` fixture whose clerkId is that user,
-// and stops the canonical turn sequence at the Eve approval-pending state (it never approves).
+// and asserts the canonical turn sequence ends in unavailable (never approval, never spend).
 //
 // Provider/network classification is done by an out-of-tree preload injected into the Eve child; the
 // deterministic root itself contains no audit code. The Clerk secret is only ever read into memory;
@@ -55,7 +58,9 @@ const PROVIDER_ENV = [
 // exactly ONE candidate; with two candidates the spending turn must name the ordinal itself
 // (the parser maps "the second one" to `{kind:"ordinal",position:2}` on the price/render turn).
 // The final render turn must be the one that names the referent so no recompose between selection
-// and spend can invalidate it. Turn 4 must land on approval-pending.
+// and spend can invalidate it. Step 7 Phase C9.1: with the render guard disabled, turns 3 and 4
+// must land on truthful unavailable results with zero approval requests (the old approval-pending
+// expectation is superseded while disabled).
 const TURNS = [
   "give me two casual outfits",
   "make it warmer",
@@ -263,6 +268,9 @@ async function main() {
     const env = { ...process.env };
     for (const key of PROVIDER_ENV) delete env[key];
     delete env.CLERK_SECRET_KEY;
+    // Step 7 Phase C9.1 — this canary asserts the DISABLED contract (first-production shape), so
+    // the flag is forced absent in the child even if the operator shell happens to set it.
+    delete env.STYLIST_RENDER_ENABLED;
     env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --require ${PRELOAD}`.trim();
     env.C8_AUDIT_OUT = AUDIT_FILE;
     env.AGENT_DEV_CLERK_USER_ID = clerkId;
@@ -290,8 +298,29 @@ async function main() {
       }
     }
 
-    assert("CANARY.approval", "render turn stops at approval-pending", Boolean(approval), JSON.stringify(approval));
-    assert("CANARY.noApprove", "nothing was approved or spent (harness never selects an approval option)", Boolean(approval), null);
+    // Step 7 Phase C9.1 — rendering is disabled by default (STYLIST_RENDER_ENABLED is unset in
+    // the Eve child env, exactly like the first production release), so the spend path must be
+    // unreachable before approval: no input request on any turn, and price/render turns answer
+    // with the truthful unavailable message instead of a quote or an approval card.
+    const priceTurn = capture.turns.find((t) => t.turn === 3);
+    const renderTurn = capture.turns.find((t) => t.turn === 4);
+    assert("CANARY.noApproval", "no Eve approval request on any turn while disabled", approval === null, JSON.stringify(approval));
+    assert(
+      "CANARY.priceUnavailable",
+      "price turn is truthfully unavailable with no numeric quote",
+      Boolean(priceTurn) &&
+        (priceTurn.inputRequests ?? []).length === 0 &&
+        String(priceTurn.message ?? "").includes("temporarily unavailable"),
+      JSON.stringify({ message: priceTurn?.message, inputRequests: priceTurn?.inputRequests }),
+    );
+    assert(
+      "CANARY.renderUnavailable",
+      "render turn is truthfully unavailable with no approval request",
+      Boolean(renderTurn) &&
+        (renderTurn.inputRequests ?? []).length === 0 &&
+        String(renderTurn.message ?? "").includes("temporarily unavailable"),
+      JSON.stringify({ message: renderTurn?.message, inputRequests: renderTurn?.inputRequests }),
+    );
 
     // 6) Classify the child's outbound traffic.
     await delay(750);

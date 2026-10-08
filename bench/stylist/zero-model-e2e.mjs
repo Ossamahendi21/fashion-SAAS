@@ -161,6 +161,9 @@ async function turn(id, label, text, { state, threadId, clerkUserId, quality, pe
     ...ports,
     composeOutfits: (request) => ports.composeOutfits({ ...request, threadId }),
   };
+  // Step 7 Phase C9.1 — C6 pins the historical enabled-mode contract (quote/approval/spend
+  // against fakes with the paid boundary blocked), so the render capability is explicitly enabled
+  // here. Production omits the flag and resolves the fail-closed policy instead.
   const result = await runStylistTextTurn({
     text,
     state,
@@ -169,6 +172,7 @@ async function turn(id, label, text, { state, threadId, clerkUserId, quality, pe
     quality,
     perOutfit,
     approved,
+    renderEnabled: true,
   });
   let error = null;
   if (result.outcome.kind === "readFailed") {
@@ -182,6 +186,7 @@ async function turn(id, label, text, { state, threadId, clerkUserId, quality, pe
         quality,
         perOutfit,
         approved,
+        renderEnabled: true,
       });
     } catch (thrown) {
       error = thrown?.stack ?? thrown?.message ?? String(thrown);
