@@ -232,6 +232,54 @@ test("group status preserves pending answers and mixed cancellations instead of 
   assert.equal(grouped[0].kind, "part", "pending approval tools continue to use their interactive cards");
 });
 
+test("a completed deterministic stylist_turn reads as completed, never paused", () => {
+  const stream = replay();
+  const stylistAction = {
+    callId: "call_stylist_turn",
+    kind: "tool-call",
+    toolName: "stylist_turn",
+    input: { turn: { intent: "recommend" } },
+  };
+  const running = stream.event("actions.requested", { actions: [stylistAction] });
+  assert.equal(activityState(running, true), "running");
+  assert.equal(summarizeActivity([running], true)[0].label, "Working out your look");
+  const done = stream.event("action.result", {
+    result: {
+      callId: "call_stylist_turn",
+      kind: "tool-result",
+      toolName: "stylist_turn",
+      output: { kind: "recommendation", stage: "PROPOSED", summary: "Proposed 2 outfits.", response: "Here are 2 looks." },
+    },
+    status: "completed",
+  });
+  assert.equal(activityState(done, false), "done");
+  const [row] = summarizeActivity([done], false);
+  assert.equal(row.label, "Stylist turn completed");
+  assert.equal(row.detail, "Proposed 2 outfits.");
+  assert.doesNotMatch(JSON.stringify(row), /No result received|Paused/);
+});
+
+test("a failed deterministic stylist_turn reads as failed with its own copy", () => {
+  const stream = replay();
+  stream.event("actions.requested", {
+    actions: [
+      {
+        callId: "call_stylist_turn",
+        kind: "tool-call",
+        toolName: "stylist_turn",
+        input: { turn: { intent: "render" } },
+      },
+    ],
+  });
+  const failure = stream.event("action.result", {
+    result: { callId: "call_stylist_turn", kind: "tool-result", toolName: "stylist_turn" },
+    status: "failed",
+    error: { code: "NETWORK", message: "boom" },
+  });
+  assert.equal(activityState(failure, false), "error");
+  assert.match(summarizeActivity([failure], false)[0].label, /didn’t finish/);
+});
+
 test("mobile Return and IME confirmation never accidentally send, while keyboard shortcuts do", () => {
   const key = { key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, isComposing: false };
   assert.equal(shouldSubmitComposer(key, false), true);

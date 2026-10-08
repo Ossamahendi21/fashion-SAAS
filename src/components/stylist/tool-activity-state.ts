@@ -47,6 +47,13 @@ const LABELS: Record<string, { running: string; done: string; failed: string }> 
   start_renders: { running: "Starting your try-on", done: "Try-on started", failed: "Couldn’t start your try-on" },
   save_outfit: { running: "Saving your outfit", done: "Outfit saved", failed: "Couldn’t save your outfit" },
   ask_question: { running: "Using your answer", done: "Answer received", failed: "Couldn’t use that answer" },
+  // Step 7 Phase C10B — the deterministic root's single tool. Same prose family as the legacy
+  // surface; completed calls must read as completed, never paused.
+  stylist_turn: {
+    running: "Working out your look",
+    done: "Stylist turn completed",
+    failed: "The stylist turn didn’t finish",
+  },
 };
 const FALLBACK = { running: "Working on your request", done: "Step completed", failed: "This step didn’t finish" };
 
@@ -122,6 +129,11 @@ function resultDetail(part: ActivityTool): string {
       const days = output.outlook.length;
       return days === 0 ? "No forecast available for those dates" : `${days}-day forecast`;
     }
+  }
+  if (part.toolName === "stylist_turn") {
+    // The deterministic tool already authors a per-outcome summary; surface it verbatim.
+    const summary = output.summary;
+    return typeof summary === "string" && summary.length > 0 ? summary : "";
   }
   if (part.toolName === "quote_renders") {
     const credits = count(output.credits);
