@@ -35,6 +35,8 @@ export type StylistTextTurnOptions = {
   quality?: RenderQuality;
   perOutfit?: number;
   approved?: boolean;
+  /** Step 7 Phase C9.1 — explicit render capability; omitted resolves the fail-closed policy. */
+  renderEnabled?: boolean;
 };
 
 export type StylistTextTurnResult = {
@@ -63,6 +65,7 @@ export async function runStylistTextTurn(options: StylistTextTurnOptions): Promi
       ...(options.quality !== undefined ? { quality: options.quality } : {}),
       ...(options.perOutfit !== undefined ? { perOutfit: options.perOutfit } : {}),
       ...(options.approved !== undefined ? { approved: options.approved } : {}),
+      ...(options.renderEnabled !== undefined ? { renderEnabled: options.renderEnabled } : {}),
     });
   } catch {
     const outcome: StylistResponseOutcome = { kind: "readFailed" };

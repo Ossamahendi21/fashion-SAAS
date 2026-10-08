@@ -32,6 +32,8 @@ export type DeterministicStylistCanaryOptions = {
   ports: StylistPorts;
   state: StylistThreadState;
   now?: number;
+  /** Step 7 Phase C9.1 — explicit render capability; omitted resolves the fail-closed policy. */
+  renderEnabled?: boolean;
 };
 
 export function createDeterministicStylistCanary(
@@ -45,7 +47,8 @@ export function createDeterministicStylistCanary(
     description:
       "Run one deterministic stylist turn for the latest user message. The only tool available.",
     inputSchema: stylistTurnInputSchema,
-    needsApproval: (input) => turnNeedsApproval(state, input.turn as StylistTurnInput),
+    needsApproval: (input) =>
+      turnNeedsApproval(state, input.turn as StylistTurnInput, options.renderEnabled),
     execute: async (input) => {
       const result = await runStylistTurn({
         state,
@@ -55,6 +58,7 @@ export function createDeterministicStylistCanary(
         approved: true,
         ...(input.quality !== undefined ? { quality: input.quality } : {}),
         ...(input.perOutfit !== undefined ? { perOutfit: input.perOutfit } : {}),
+        ...(options.renderEnabled !== undefined ? { renderEnabled: options.renderEnabled } : {}),
       });
       state = result.state;
       const output = toStylistTurnOutput(result);

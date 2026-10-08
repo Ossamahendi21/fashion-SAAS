@@ -15,6 +15,7 @@ import {
   type WardrobeItem,
   type WeatherFacts,
 } from "./stylist-rank";
+import { isStylistRenderEnabled, renderUnavailableBlockers } from "./stylist-render-policy";
 import type { StylistQuote, StylistThreadState } from "./stylist-state";
 import { QUOTE_TTL_MS } from "./stylist-state";
 
@@ -117,6 +118,12 @@ export type StylistTurnOptions = {
   quality?: RenderQuality;
   perOutfit?: number;
   approved?: boolean;
+  /**
+   * Step 7 Phase C9.1 — render capability. The tool/runtime edge omits this so the fail-closed
+   * production policy (`STYLIST_RENDER_ENABLED`) resolves at call time; tests inject it explicitly
+   * and never touch process.env.
+   */
+  renderEnabled?: boolean;
 };
 
 /** Raised when an event is applied out of order; indicates a bug, not a user error. */
@@ -132,9 +139,18 @@ export class StylistOrchestrationError extends Error {
 
 /**
  * Pure decision for the tool's approval policy: only a render turn that resolved a referent and
- * raised no clarification will spend credits and therefore needs the human.
+ * raised no clarification will spend credits and therefore needs the human. Step 7 Phase C9.1:
+ * while the render capability is disabled no render turn can need approval, so the UI never
+ * offers an Approve button for an action that cannot safely execute. Callers that omit
+ * `renderEnabled` resolve the fail-closed production policy; tests pass it explicitly.
  */
-export function turnNeedsApproval(state: StylistThreadState, turn: StylistTurnInput): boolean {
+export function turnNeedsApproval(
+  state: StylistThreadState,
+  turn: StylistTurnInput,
+  renderEnabled?: boolean,
+): boolean {
+  const enabled = renderEnabled ?? isStylistRenderEnabled();
+  if (!enabled) return false;
   const plan = mergeStylistTurn(planStateOf(state), turn);
   return plan.intent === "render" && plan.clarification === null && plan.referent !== null;
 }
@@ -151,14 +167,21 @@ export async function runStylistTurn(options: StylistTurnOptions): Promise<Styli
     return { kind: "clarification", clarification: plan.clarification, state: withPlan(next, plan), plan };
   }
 
+  // Step 7 Phase C9.1 — fail-closed render guard. The capability resolves once per turn at
+  // this edge (omitted = production policy, explicit = tests); price/render branches enforce it
+  // inside quoteTurn AFTER referent clarification, so unknown referents still clarify exactly as
+  // before and no port is touched while disabled: no quote call, no approval, no reservation, no
+  // workflow, no provider. Stale approvals and approved replays re-enter through this same path.
+  const renderEnabled = options.renderEnabled ?? isStylistRenderEnabled();
+
   switch (plan.intent) {
     case "recommend":
     case "refine":
       return recommend(state, plan, ports, now);
     case "price":
-      return quoteTurn(state, plan, ports, now, quality, perOutfit, "price", false);
+      return quoteTurn(state, plan, ports, now, quality, perOutfit, "price", false, renderEnabled);
     case "render":
-      return quoteTurn(state, plan, ports, now, quality, perOutfit, "render", approved);
+      return quoteTurn(state, plan, ports, now, quality, perOutfit, "render", approved, renderEnabled);
     case "save":
       return save(state, plan, ports, now);
     case "gaps": {
@@ -221,6 +244,7 @@ async function quoteTurn(
   perOutfit: number,
   mode: "price" | "render",
   approved: boolean,
+  renderEnabled: boolean,
 ): Promise<StylistTurnResult> {
   const planReferent = plan.referent;
   if (!planReferent) {
@@ -231,6 +255,12 @@ async function quoteTurn(
       state: withPlan(next, plan),
       plan,
     };
+  }
+
+  // Step 7 Phase C9.1 — the referent resolved, so a spendable action is one port call away:
+  // stop here while disabled. No quote call, no approval downstream, no reservation, no provider.
+  if (!renderEnabled) {
+    return { kind: "renderBlocked", blockers: renderUnavailableBlockers(), state, plan };
   }
 
   const outfitIds = [planReferent.outfitId];
