@@ -29,7 +29,6 @@ export function OutfitBuilder(props: OutfitBuilderProps) {
 
 function CreateBuilder() {
   const router = useRouter();
-  const renderAvailability = useRenderAvailability();
   const [dirty, setDirty] = useState(false);
 
   return (
@@ -37,11 +36,7 @@ function CreateBuilder() {
       <PageHeader
         eyebrow="The outfit studio"
         title="New outfit"
-        description={
-          renderAvailability?.enabled
-            ? "Choose your pieces, save the look, then try it on."
-            : "Choose your pieces and save the look."
-        }
+        description="Choose your pieces, save the look, then try it on."
         actions={
           dirty ? (
             <ConfirmDialog
@@ -69,12 +64,7 @@ function CreateBuilder() {
           )
         }
       />
-      <OutfitForm
-        mode="create"
-        initial={EMPTY_DRAFT}
-        tryOnAvailable={renderAvailability?.enabled === true}
-        onDirtyChange={setDirty}
-      />
+      <OutfitForm mode="create" initial={EMPTY_DRAFT} onDirtyChange={setDirty} />
     </div>
   );
 }
@@ -159,7 +149,6 @@ function SavedOutfitBuilder({ outfit }: { outfit: Outfit }) {
             compact
             outfitId={outfit._id}
             initial={draftFromOutfit(outfit)}
-            tryOnAvailable={renderingEnabled}
             onDirtyChange={setDirty}
             onTryOn={renderingEnabled ? openFittingRoom : undefined}
           />
