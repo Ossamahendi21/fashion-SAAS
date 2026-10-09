@@ -30,6 +30,11 @@ import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
 
+/** Provider/configuration details are retained in backend jobs, never shown to an end user. */
+export function renderFailureMessage(error: string | undefined): string | undefined {
+  return error ? "This try-on couldn't be completed. Please try again." : undefined;
+}
+
 export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?: string): Promise<RenderView> {
   const name = outfitName ?? (await ctx.db.get(render.outfitId))?.name ?? "Outfit";
   return {
@@ -43,7 +48,7 @@ export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?
     url: render.storageId ? await ctx.storage.getUrl(render.storageId) : null,
     creditsCharged: render.creditsCharged,
     shareToken: render.shareToken,
-    error: render.error,
+    error: renderFailureMessage(render.error),
     createdAt: render.createdAt,
     completedAt: render.completedAt,
   };

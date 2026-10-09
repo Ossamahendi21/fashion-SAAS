@@ -31,7 +31,7 @@ globalThis.Convex = {
 };
 
 const { renderOutfitImage, renderProvider } = await import("../convex/ai/rendering.ts");
-const { markRenderDone } = await import("../convex/model/renders.ts");
+const { markRenderDone, renderFailureMessage } = await import("../convex/model/renders.ts");
 const { renderDone } = await import("../convex/ai/pipeline.ts");
 const { usageToUsd } = await import("../convex/shared/credits.ts");
 
@@ -66,8 +66,7 @@ function dbFixture() {
     },
     query(table) {
       const filters = [];
-      const selected = () =>
-        tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
+      const selected = () => tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
       const query = {
         withIndex(_name, build) {
           const index = {
@@ -122,6 +121,14 @@ test("an unknown RENDER_PROVIDER fails closed with a clear message", () => {
   assert.throws(() => renderProvider({ RENDER_PROVIDER: "" }), /not supported/);
 });
 
+test("render failures never expose provider configuration details to the UI", () => {
+  assert.equal(
+    renderFailureMessage("Missing environment variable AI_GATEWAY_API_KEY."),
+    "This try-on couldn't be completed. Please try again.",
+  );
+  assert.equal(renderFailureMessage(undefined), undefined);
+});
+
 test("dispatch invokes the openai runner exactly once and passes everything through", async () => {
   const calls = [];
   const runners = {
@@ -152,7 +159,10 @@ test("a runner failure propagates unchanged and never calls another provider", a
       throw sentinel;
     },
   };
-  await assert.rejects(() => renderOutfitImage(request(), runners, {}), (error) => error === sentinel);
+  await assert.rejects(
+    () => renderOutfitImage(request(), runners, {}),
+    (error) => error === sentinel,
+  );
 });
 
 test("markRenderDone with OpenAI usage records usage and token-derived COGS", async () => {
@@ -191,9 +201,8 @@ test("markRenderDone with usage absent and a positive explicit cost records it v
 
 test("markRenderDone with usage absent and costUsd absent fails closed", async () => {
   const f = dbFixture();
-  await assert.rejects(
-    markRenderDone(f.ctx, "render1", { storageId: "blob" }),
-    (error) => /usage or an explicit costUsd/.test(error.message),
+  await assert.rejects(markRenderDone(f.ctx, "render1", { storageId: "blob" }), (error) =>
+    /usage or an explicit costUsd/.test(error.message),
   );
   const render = await f.db.get("render1");
   assert.equal(render.status, "pending", "the invalid case must not mark the render done");
