@@ -11,7 +11,6 @@
 import type * as admin from "../admin.js";
 import type * as agent from "../agent.js";
 import type * as ai_colours from "../ai/colours.js";
-import type * as ai_composite from "../ai/composite.js";
 import type * as ai_deterministic_detection from "../ai/deterministic_detection.js";
 import type * as ai_embedding from "../ai/embedding.js";
 import type * as ai_extraction from "../ai/extraction.js";
@@ -84,7 +83,6 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   agent: typeof agent;
   "ai/colours": typeof ai_colours;
-  "ai/composite": typeof ai_composite;
   "ai/deterministic_detection": typeof ai_deterministic_detection;
   "ai/embedding": typeof ai_embedding;
   "ai/extraction": typeof ai_extraction;
