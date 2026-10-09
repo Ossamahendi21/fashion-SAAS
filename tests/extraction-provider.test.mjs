@@ -51,7 +51,9 @@ const sharp = (await import("sharp")).default;
 /** A PNG buffer: rgba (true) or rgb (false), optionally a specific size. */
 async function pngBytes({ width = 64, height = 64, rgba = true, alpha = 1 } = {}) {
   const background = rgba ? { r: 30, g: 60, b: 90, alpha } : { r: 30, g: 60, b: 90 };
-  return sharp({ create: { width, height, channels: rgba ? 4 : 3, background } }).png().toBuffer();
+  return sharp({ create: { width, height, channels: rgba ? 4 : 3, background } })
+    .png()
+    .toBuffer();
 }
 
 const baseEnv = {
@@ -75,8 +77,8 @@ function transportOf(body, { status = 200, throwError = null } = {}) {
 
 const kindOf = (error) => (error instanceof ExtractionError ? error.kind : undefined);
 
-test("extraction provider defaults to the free self-hosted florencesam with no env", () => {
-  assert.equal(extractionProvider({}), "florencesam");
+test("extraction provider defaults to the zero-provider original-image path with no env", () => {
+  assert.equal(extractionProvider({}), "original");
 });
 
 test("EXTRACTION_PROVIDER=openai stays available as the explicit legacy reference", () => {
@@ -101,14 +103,26 @@ test("an unknown EXTRACTION_PROVIDER fails closed with a clear message", () => {
 });
 
 test("withoutBG config fails closed when a required server env var is missing", () => {
-  assert.throws(() => withoutBgConfig({ WITHOUTBG_BASE_URL: "https://x", WITHOUTBG_COST_USD_PER_IMAGE: "0.001" }), /WITHOUTBG_API_KEY/);
-  assert.throws(() => withoutBgConfig({ WITHOUTBG_API_KEY: "k", WITHOUTBG_COST_USD_PER_IMAGE: "0.001" }), /WITHOUTBG_BASE_URL/);
+  assert.throws(
+    () => withoutBgConfig({ WITHOUTBG_BASE_URL: "https://x", WITHOUTBG_COST_USD_PER_IMAGE: "0.001" }),
+    /WITHOUTBG_API_KEY/,
+  );
+  assert.throws(
+    () => withoutBgConfig({ WITHOUTBG_API_KEY: "k", WITHOUTBG_COST_USD_PER_IMAGE: "0.001" }),
+    /WITHOUTBG_BASE_URL/,
+  );
 });
 
 test("withoutBG cost defaults to the documented estimate and guards malformed/negative env", () => {
-  assert.equal(withoutBgConfig({ WITHOUTBG_BASE_URL: "x", WITHOUTBG_API_KEY: "k" }).costUsdPerImage, WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT);
+  assert.equal(
+    withoutBgConfig({ WITHOUTBG_BASE_URL: "x", WITHOUTBG_API_KEY: "k" }).costUsdPerImage,
+    WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT,
+  );
   assert.equal(withoutBgConfig({ ...baseEnv, WITHOUTBG_COST_USD_PER_IMAGE: "0" }).costUsdPerImage, 0);
-  assert.equal(withoutBgConfig({ ...baseEnv, WITHOUTBG_COST_USD_PER_IMAGE: "-2" }).costUsdPerImage, WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT);
+  assert.equal(
+    withoutBgConfig({ ...baseEnv, WITHOUTBG_COST_USD_PER_IMAGE: "-2" }).costUsdPerImage,
+    WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT,
+  );
 });
 
 test("withoutBG request targets {baseUrl}/v1/remove-background with X-API-Key and image/png", () => {
@@ -121,7 +135,10 @@ test("withoutBG request targets {baseUrl}/v1/remove-background with X-API-Key an
   const { url, init } = withoutBgRequest(config(), new Uint8Array([1, 2, 3]));
   assert.equal(url, "https://gw.example/v1/remove-background");
   assert.equal(init.method, "POST");
-  assert.deepEqual(new Uint8Array(init.body.buffer, init.body.byteOffset, init.body.byteLength), new Uint8Array([1, 2, 3]));
+  assert.deepEqual(
+    new Uint8Array(init.body.buffer, init.body.byteOffset, init.body.byteLength),
+    new Uint8Array([1, 2, 3]),
+  );
 });
 
 test("withoutBG 200 transparent PNG resolves to a transparent cutout with the configured cost", async () => {
@@ -232,7 +249,9 @@ test("ensureSquareCutout passes an already 1024×1024 PNG through byte-identical
 test("ensureSquareCutout pads a smaller cutout onto a centered 1024×1024 transparent canvas, preserving alpha", async () => {
   const size = EXTRACTION_CUTOUT_SIZE;
   const small = await pngBytes({ width: 300, height: 200, rgba: true });
-  const { bytes, width, height } = await ensureSquareCutout(new Uint8Array(small.buffer, small.byteOffset, small.byteLength));
+  const { bytes, width, height } = await ensureSquareCutout(
+    new Uint8Array(small.buffer, small.byteOffset, small.byteLength),
+  );
   assert.equal(width, size);
   assert.equal(height, size);
   assert.equal(parseWithoutBgBytes(bytes).hasAlpha, true);
@@ -284,7 +303,11 @@ test("florencesam rejects a blank garment prompt before any network call", async
 test("florencesam 200 transparent PNG resolves with $0 spend and no token usage", async () => {
   const body = await pngBytes({ width: 200, height: 300 });
   const { transport } = transportOf(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
-  const result = await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a dress" }, fsConfig(), transport);
+  const result = await florenceSamExtract(
+    { bytes: new Uint8Array([0]), prompt: "a photo of a dress" },
+    fsConfig(),
+    transport,
+  );
   assert.equal(result.provider, "florencesam");
   assert.equal(result.background, "transparent");
   assert.equal(result.width, 200);
@@ -297,7 +320,11 @@ test("florencesam 200 transparent PNG resolves with $0 spend and no token usage"
 test("florencesam 200 opaque PNG is classified opaque but still accepted", async () => {
   const body = await pngBytes({ rgba: false });
   const { transport } = transportOf(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
-  const result = await florenceSamExtract({ bytes: new Uint8Array([0]), prompt: "a photo of a jacket" }, fsConfig(), transport);
+  const result = await florenceSamExtract(
+    { bytes: new Uint8Array([0]), prompt: "a photo of a jacket" },
+    fsConfig(),
+    transport,
+  );
   assert.equal(result.background, "opaque");
 });
 

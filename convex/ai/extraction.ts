@@ -8,7 +8,9 @@ import type { TokenUsage } from "../shared/credits";
  * The extraction cutout seam. `extractItem` (in `ai/openai.ts`) asks this module for a garment
  * cutout and it dispatchs on the server-only `EXTRACTION_PROVIDER` env:
  *
- * - "florencesam" (default): self-hosted Florence-2-base grounding plus SAM2.1 Tiny segmentation
+ * - "original" (default): preserves the normalized uploaded image without an external call. This
+ *   zero-provider fallback supports one isolated garment per photo and reports exactly $0 spend.
+ * - "florencesam": self-hosted Florence-2-base grounding plus SAM2.1 Tiny segmentation
  *   (`POST {baseUrl}/v1/extract` with `{ image: base64Png, prompt }`, `X-API-Key`), validated in
  *   Step 4 at F1 >= 98 on all 7 fixture cases with one deterministic rule per stage (Florence
  *   largest-area box, SAM largest-area mask). External provider spend is $0 by contract.
@@ -34,7 +36,7 @@ export const EXTRACTION_TIMEOUT_MS = 5 * 60 * 1000;
 /** Self-hosted cost placeholder recorded as COGS per extraction until an operator calibrates it. */
 export const WITHOUTBG_COST_USD_PER_IMAGE_DEFAULT = 0.001;
 
-export const EXTRACTION_PROVIDERS = ["openai", "withoutbg", "florencesam"] as const;
+export const EXTRACTION_PROVIDERS = ["original", "openai", "withoutbg", "florencesam"] as const;
 export type ExtractionProviderId = (typeof EXTRACTION_PROVIDERS)[number];
 
 export type ExtractionErrorKind =
@@ -64,11 +66,12 @@ export class ExtractionError extends Error {
 /** Which provider cuts this photo. Reads per call so tests can flip it without a stale cache. */
 export function extractionProvider(env: Record<string, string | undefined> = process.env): ExtractionProviderId {
   const provider = env.EXTRACTION_PROVIDER;
-  if (provider === undefined) return "florencesam";
-  if (provider === "openai" || provider === "withoutbg" || provider === "florencesam") return provider;
+  if (provider === undefined) return "original";
+  if (provider === "original" || provider === "openai" || provider === "withoutbg" || provider === "florencesam")
+    return provider;
   throw new ExtractionError(
     "auth-config",
-    `EXTRACTION_PROVIDER "${provider}" is not supported; use "florencesam", "openai" or "withoutbg".`,
+    `EXTRACTION_PROVIDER "${provider}" is not supported; use "original", "florencesam", "openai" or "withoutbg".`,
   );
 }
 
@@ -127,13 +130,25 @@ export function classifyWithoutBgStatus(status: number): ExtractionError {
     case 400:
     case 415:
     case 422:
-      return new ExtractionError("invalid-input", `The withoutBG gateway rejected this image (HTTP ${status}).`, status);
+      return new ExtractionError(
+        "invalid-input",
+        `The withoutBG gateway rejected this image (HTTP ${status}).`,
+        status,
+      );
     case 413:
-      return new ExtractionError("unsupported-image", `The image is too large for the withoutBG gateway (HTTP 413).`, status);
+      return new ExtractionError(
+        "unsupported-image",
+        `The image is too large for the withoutBG gateway (HTTP 413).`,
+        status,
+      );
     default:
       return status >= 500
         ? new ExtractionError("transient", `The withoutBG gateway failed (HTTP ${status}).`, status)
-        : new ExtractionError("permanent-rejection", `The withoutBG gateway rejected the request (HTTP ${status}).`, status);
+        : new ExtractionError(
+            "permanent-rejection",
+            `The withoutBG gateway rejected the request (HTTP ${status}).`,
+            status,
+          );
   }
 }
 
@@ -181,9 +196,12 @@ async function gatewayFetch(
 }
 
 /** Reads cutout bytes: dims and whether the PNG genuinely carries an alpha channel. */
-export function parseWithoutBgBytes(
-  bytes: Uint8Array,
-): { bytes: Uint8Array<ArrayBuffer>; width: number; height: number; hasAlpha: boolean } {
+export function parseWithoutBgBytes(bytes: Uint8Array): {
+  bytes: Uint8Array<ArrayBuffer>;
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+} {
   let png: PNGWithMetadata;
   try {
     png = PNG.sync.read(Buffer.from(bytes));
@@ -339,10 +357,18 @@ export function classifyFlorenceSamStatus(status: number): ExtractionError {
       );
     case 408:
     case 429:
-      return new ExtractionError("rate-limited", `The Florence+SAM2 gateway is rate-limiting (HTTP ${status}).`, status);
+      return new ExtractionError(
+        "rate-limited",
+        `The Florence+SAM2 gateway is rate-limiting (HTTP ${status}).`,
+        status,
+      );
     case 400:
     case 415:
-      return new ExtractionError("invalid-input", `The Florence+SAM2 gateway rejected this image (HTTP ${status}).`, status);
+      return new ExtractionError(
+        "invalid-input",
+        `The Florence+SAM2 gateway rejected this image (HTTP ${status}).`,
+        status,
+      );
     case 422:
       return new ExtractionError(
         "invalid-input",
@@ -350,11 +376,19 @@ export function classifyFlorenceSamStatus(status: number): ExtractionError {
         status,
       );
     case 413:
-      return new ExtractionError("unsupported-image", `The image is too large for the Florence+SAM2 gateway (HTTP 413).`, status);
+      return new ExtractionError(
+        "unsupported-image",
+        `The image is too large for the Florence+SAM2 gateway (HTTP 413).`,
+        status,
+      );
     default:
       return status >= 500
         ? new ExtractionError("transient", `The Florence+SAM2 gateway failed (HTTP ${status}).`, status)
-        : new ExtractionError("permanent-rejection", `The Florence+SAM2 gateway rejected the request (HTTP ${status}).`, status);
+        : new ExtractionError(
+            "permanent-rejection",
+            `The Florence+SAM2 gateway rejected the request (HTTP ${status}).`,
+            status,
+          );
   }
 }
 
@@ -369,7 +403,14 @@ export async function florenceSamExtract(
 ): Promise<ExtractGarmentResult> {
   const started = Date.now();
   const { url, init } = florenceSamRequest(config, input.bytes, input.prompt);
-  const { bytes } = await gatewayFetch(url, init, config.timeoutMs, transport, classifyFlorenceSamStatus, "Florence+SAM2");
+  const { bytes } = await gatewayFetch(
+    url,
+    init,
+    config.timeoutMs,
+    transport,
+    classifyFlorenceSamStatus,
+    "Florence+SAM2",
+  );
   const parsed = parseWithoutBgBytes(bytes);
   return {
     bytes: parsed.bytes,
@@ -391,7 +432,9 @@ export async function ensureSquareCutout(
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; width: number; height: number }> {
   let metadata: Metadata;
   try {
-    metadata = await sharp(Buffer.from(input), { limitInputPixels: EXTRACTION_CUTOUT_SIZE * EXTRACTION_CUTOUT_SIZE * 16 }).metadata();
+    metadata = await sharp(Buffer.from(input), {
+      limitInputPixels: EXTRACTION_CUTOUT_SIZE * EXTRACTION_CUTOUT_SIZE * 16,
+    }).metadata();
   } catch {
     throw new ExtractionError("malformed-output", "The cutout bytes are not a decodable image.");
   }
@@ -475,11 +518,13 @@ export async function extractGarmentCutout(
 ): Promise<ExtractGarmentResult> {
   const provider = extractionProvider(env);
   const cut =
-    provider === "openai"
-      ? await runners.openai(request)
-      : provider === "withoutbg"
-        ? await runners.withoutbg(request)
-        : await runners.florencesam(request);
+    provider === "original"
+      ? { bytes: request.imageBytes, background: "opaque" as const, costUsd: 0, latencyMs: 0 }
+      : provider === "openai"
+        ? await runners.openai(request)
+        : provider === "withoutbg"
+          ? await runners.withoutbg(request)
+          : await runners.florencesam(request);
   const square = await ensureSquareCutout(cut.bytes);
   return {
     bytes: square.bytes,

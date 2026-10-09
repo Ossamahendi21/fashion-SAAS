@@ -71,11 +71,11 @@ export const beginIngest = internalMutation({
 /** The stored photo behind an upload; the action reads the bytes itself so no public URL is needed. */
 export const uploadPhoto = internalQuery({
   args: { uploadId: v.id("uploads") },
-  returns: v.object({ storageId: v.id("_storage"), mimeType: v.string() }),
-  handler: async (ctx, { uploadId }): Promise<{ storageId: Id<"_storage">; mimeType: string }> => {
+  returns: v.object({ storageId: v.id("_storage"), mimeType: v.string(), fileName: v.string() }),
+  handler: async (ctx, { uploadId }): Promise<{ storageId: Id<"_storage">; mimeType: string; fileName: string }> => {
     const upload = await ctx.db.get(uploadId);
     if (!upload) throw appError("NOT_FOUND", "That upload no longer exists.");
-    return { storageId: upload.storageId, mimeType: upload.mimeType };
+    return { storageId: upload.storageId, mimeType: upload.mimeType, fileName: upload.fileName };
   },
 });
 
@@ -192,7 +192,10 @@ export const recordShoppingDetection = internalMutation({
 
     if (found === 0) {
       await ctx.db.patch(args.uploadId, { candidates: [], detectedCount: 0, status: "done" });
-      await setStep(ctx, args.jobId, INGEST_STEPS.detect, { status: "done", meta: { found: 0, costUsd: detectCostUsd } });
+      await setStep(ctx, args.jobId, INGEST_STEPS.detect, {
+        status: "done",
+        meta: { found: 0, costUsd: detectCostUsd },
+      });
       if (detectCostUsd > 0) await bumpDailyStats(ctx, { cogsUsd: detectCostUsd });
       return { found: 0, granted: 0, skipped: 0, toExtract: [] };
     }
@@ -350,7 +353,7 @@ export const itemReady = internalMutation({
     usage: v.optional(vTokenUsage),
     /** Provider-specific COGS for providers without SDK token accounting (self-hosted withoutBG). */
     costUsd: v.optional(v.number()),
-    embeddingBge: v.array(v.float64()),
+    embeddingBge: v.optional(v.array(v.float64())),
   },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
@@ -360,7 +363,7 @@ export const itemReady = internalMutation({
       usage: args.usage,
       costUsd: args.costUsd,
     });
-    await setItemEmbeddingBge(ctx, args.itemId, args.embeddingBge);
+    if (args.embeddingBge) await setItemEmbeddingBge(ctx, args.itemId, args.embeddingBge);
     await appendResult(ctx, args.jobId, args.itemId);
     await setStep(ctx, args.jobId, args.stepKey, {
       status: "done",

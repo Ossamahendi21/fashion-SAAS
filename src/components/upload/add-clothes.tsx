@@ -261,11 +261,11 @@ export function AddClothes() {
               size="lg"
               className="min-h-0 gap-2 px-4 py-4 sm:min-h-56 @3xl:gap-3 @3xl:px-5 @3xl:py-6"
               title="Drop your photos here"
-              description={`One piece or a whole outfit. Up to ${LIMITS.maxPhotosPerUpload} photos.`}
+              description={`One garment per photo. Up to ${LIMITS.maxPhotosPerUpload} photos.`}
               buttonLabel={busy ? "Uploading…" : "Select photos"}
             />
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Free scan. Choose what to keep. {formatCredits(CREDIT_COSTS.extractItem)} per imported piece.
+              Zero-cost scan. Choose what to keep. {formatCredits(CREDIT_COSTS.extractItem)} per imported piece.
             </p>
           </section>
           <details className="border-t pt-4">

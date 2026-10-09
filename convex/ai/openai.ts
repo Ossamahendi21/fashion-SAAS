@@ -4,16 +4,16 @@ import { v, type Infer } from "convex/values";
 import OpenAI, { toFile } from "openai";
 import type { ImageEditParamsNonStreaming, ImagesResponse } from "openai/resources/images";
 import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
-import { internalAction, type ActionCtx } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { envNumber, optionalEnv, requireEnv } from "../lib/env";
 import { appError, isAppError } from "../lib/errors";
-import { LIMITS, usageToUsd, type TokenUsage } from "../shared/credits";
+import { usageToUsd, type TokenUsage } from "../shared/credits";
 import { embeddingText } from "../shared/embeddingText";
 import { INGEST_STEPS } from "../shared/jobs";
 import { vDetectedItem, vRawStylingSuggestion, type RawStylingSuggestion } from "../shared/validators";
-import { FORMALITY, isCategory, SEASONS, type Formality, type Season, type Slot } from "../shared/wardrobe";
+import { type Slot } from "../shared/wardrobe";
 import { dominantHex } from "./colours";
+import { deterministicDetectedItem } from "./deterministic_detection";
 import {
   embedText,
   EMBEDDING_MODELS,
@@ -35,13 +35,11 @@ import { renderOutfitImage, type RenderRequest, type RenderRunnerResult } from "
 import {
   coerceAdviceResponse,
   coerceStylingResponse,
-  detectionInstructions,
   extractionNoun,
   extractionPrompt,
   groundingPhrase,
   renderPrompt,
   shoppingAdviceSummary,
-  shoppingDetectionInstructions,
   stylingSuggestions,
   type StylingWardrobeItem,
 } from "./prompts";
@@ -87,42 +85,25 @@ function modelId(model: string): string {
   return optionalEnv("OPENAI_API_KEY") ? model : `openai/${model}`;
 }
 
-/**
- * gpt-5-mini reads one photo and returns every wearable item in it with attributes and a bbox.
- * Free (text tokens only); the token counts land in the detect step's meta.
- */
+/** Zero-provider scan for one isolated garment photo. */
 export const detectItems = internalAction({
   args: { uploadId: v.id("uploads"), jobId: v.id("jobs") },
   returns: v.array(vDetectedItem),
   handler: async (ctx, args): Promise<DetectedItem[]> => {
     try {
       const photo = await ctx.runQuery(internal.ai.pipeline.uploadPhoto, { uploadId: args.uploadId });
-      // Inline the bytes: storage URLs are signed and, on a local deployment, unreachable from OpenAI.
-      const imageUrl = await storageDataUrl(ctx, photo.storageId);
-      const { instructions, schema } = detectionInstructions();
-      const response = await openai().responses.create({
-        model: modelId(DETECT_MODEL),
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: instructions },
-              { type: "input_image", image_url: imageUrl, detail: "high" },
-            ],
-          },
-        ],
-        text: { format: { type: "json_schema", name: "detected_items", schema, strict: true } },
-      });
-
-      const items = parseDetectedItems(response.output_text);
+      const blob = await ctx.storage.get(photo.storageId);
+      if (!blob) throw appError("NOT_FOUND", "The uploaded photo is gone.");
+      const normalized = await normalizeImageInput(blob, "photo");
+      const items = [deterministicDetectedItem(photo.fileName, dominantHex(normalized, 6))];
       await ctx.runMutation(internal.ai.pipeline.markStep, {
         jobId: args.jobId,
         key: INGEST_STEPS.detect,
         status: "running",
         meta: {
-          model: DETECT_MODEL,
-          inputTextTokens: response.usage?.input_tokens ?? 0,
-          outputTokens: response.usage?.output_tokens ?? 0,
+          provider: "deterministic",
+          inputTextTokens: 0,
+          outputTokens: 0,
         },
       });
       return items;
@@ -138,44 +119,25 @@ export const detectItems = internalAction({
   },
 });
 
-/**
- * gpt-5-mini identifies the ONE intended shopping product in a photo. The product title is an
- * untrusted hint baked into the prompt as quoted data (see shoppingDetectionInstructions); the
- * return is hard-capped to one item so a chatty model can never fan out into extractions.
- * Free (text tokens only); the token counts land in the detect step's meta like detectItems.
- */
+/** Zero-provider shopping scan, hard-capped to one full-frame item. */
 export const detectShoppingItem = internalAction({
   args: { uploadId: v.id("uploads"), jobId: v.id("jobs"), productTitle: v.string() },
   returns: v.array(vDetectedItem),
   handler: async (ctx, args): Promise<DetectedItem[]> => {
     try {
       const photo = await ctx.runQuery(internal.ai.pipeline.uploadPhoto, { uploadId: args.uploadId });
-      // Inline the bytes: storage URLs are signed and, on a local deployment, unreachable from OpenAI.
-      const imageUrl = await storageDataUrl(ctx, photo.storageId);
-      const { instructions, schema } = shoppingDetectionInstructions(args.productTitle);
-      const response = await openai().responses.create({
-        model: modelId(DETECT_MODEL),
-        input: [
-          {
-            role: "user",
-            content: [
-              { type: "input_text", text: instructions },
-              { type: "input_image", image_url: imageUrl, detail: "high" },
-            ],
-          },
-        ],
-        text: { format: { type: "json_schema", name: "shopping_item", schema, strict: true } },
-      });
-
-      const items = parseDetectedItems(response.output_text).slice(0, 1);
+      const blob = await ctx.storage.get(photo.storageId);
+      if (!blob) throw appError("NOT_FOUND", "The uploaded photo is gone.");
+      const normalized = await normalizeImageInput(blob, "photo");
+      const items = [deterministicDetectedItem(`${args.productTitle} ${photo.fileName}`, dominantHex(normalized, 6))];
       await ctx.runMutation(internal.ai.pipeline.markStep, {
         jobId: args.jobId,
         key: INGEST_STEPS.detect,
         status: "running",
         meta: {
-          model: DETECT_MODEL,
-          inputTextTokens: response.usage?.input_tokens ?? 0,
-          outputTokens: response.usage?.output_tokens ?? 0,
+          provider: "deterministic",
+          inputTextTokens: 0,
+          outputTokens: 0,
         },
       });
       return items;
@@ -284,7 +246,11 @@ export const summarizeShoppingAdvice = internalAction({
       formality: v.string(),
     }),
     similar: v.array(
-      v.object({ name: v.string(), category: v.string(), band: v.union(v.literal("very similar"), v.literal("similar")) }),
+      v.object({
+        name: v.string(),
+        category: v.string(),
+        band: v.union(v.literal("very similar"), v.literal("similar")),
+      }),
     ),
     matchCount: v.number(),
     outfitDisplay: v.string(),
@@ -302,7 +268,12 @@ export const summarizeShoppingAdvice = internalAction({
   handler: async (
     ctx,
     args,
-  ): Promise<{ summary: string; pros: string[]; considerations: string[]; usage: { inputTextTokens: number; outputTokens: number } }> => {
+  ): Promise<{
+    summary: string;
+    pros: string[];
+    considerations: string[];
+    usage: { inputTextTokens: number; outputTokens: number };
+  }> => {
     try {
       const { instructions, schema } = shoppingAdviceSummary({
         candidate: { ...args.candidate },
@@ -335,7 +306,7 @@ export const summarizeShoppingAdvice = internalAction({
 /**
  * One item: cut it out of its source photo through the extraction seam, store the PNG, read its
  * swatches and embed it through the embedding seam. The seam dispatches on EXTRACTION_PROVIDER
- * (default florencesam, the free self-hosted path); there is no failover.
+ * (default original-image preservation, with florencesam available when configured); there is no failover.
  *
  * Step 7 Phase C: the vector comes from the explicit `EMBEDDING_PROVIDER` selection (`local` BGE,
  * $0) and is written to `embeddingBge`. This action deliberately does NOT search the vector index any more: text
@@ -372,10 +343,10 @@ export const extractItem = internalAction({
 
       // `markItemReady` merges this hex into the item's colours, so building the text here from
       // `{ ...item.colours, hex }` is the same string the backfill reconstructs from persisted data.
-      const { vector } = await embedText(
-        { text: embeddingText({ ...item, colours: { ...item.colours, hex } }) },
-        embeddingRunners(),
-      );
+      const embeddingBge = optionalEnv("EMBEDDING_PROVIDER")
+        ? (await embedText({ text: embeddingText({ ...item, colours: { ...item.colours, hex } }) }, embeddingRunners()))
+            .vector
+        : undefined;
 
       await ctx.runMutation(internal.ai.pipeline.itemReady, {
         itemId: args.itemId,
@@ -385,7 +356,7 @@ export const extractItem = internalAction({
         hex,
         usage: cutout.usage,
         costUsd: cutout.costUsd,
-        embeddingBge: vector,
+        ...(embeddingBge ? { embeddingBge } : {}),
       });
       return null;
     } catch (error) {
@@ -404,7 +375,7 @@ export const extractItem = internalAction({
  * The provider implementations behind the seam. The legacy `gpt-image-2` branch keeps its
  * transparent-then-opaque retry and bills from real SDK usage; withoutBG bills a fixed
  * operator-set cost because a self-hosted gateway has no token accounting to quote; the
- * florencesam branch reports $0 external spend for the same reason. No branch ever calls
+ * original and florencesam branches report $0 external spend. No branch ever calls
  * another branch: there is no paid fallback.
  */
 function extractionRunners(): ExtractionRunners {
@@ -595,14 +566,6 @@ function decodeImage(response: ImagesResponse): { bytes: Uint8Array<ArrayBuffer>
   return { bytes, usage: imageUsage(response.usage) };
 }
 
-/** Reads a stored file and returns it as a data URL for models that accept inline images. */
-async function storageDataUrl(ctx: ActionCtx, storageId: Id<"_storage">): Promise<string> {
-  const blob = await ctx.storage.get(storageId);
-  if (!blob) throw appError("NOT_FOUND", "The uploaded photo is no longer available.");
-  const base64 = Buffer.from(await normalizeImageInput(blob)).toString("base64");
-  return `data:image/png;base64,${base64}`;
-}
-
 function pngBlob(bytes: Uint8Array<ArrayBuffer>): Blob {
   return new Blob([bytes], { type: "image/png" });
 }
@@ -678,78 +641,6 @@ function missingSlots(slots: Slot[]): Slot[] {
   }
   if (!present.has("shoes")) missing.push("shoes");
   return missing;
-}
-
-function parseDetectedItems(raw: string): DetectedItem[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw appError("UPSTREAM_FAILED", "The vision model returned something that isn't JSON.");
-  }
-  const list = isRecord(parsed) && Array.isArray(parsed.items) ? parsed.items : [];
-  return list
-    .slice(0, LIMITS.maxItemsPerPhoto)
-    .filter(isRecord)
-    .map(coerceDetectedItem)
-    .filter((item) => item.name.length > 0 && item.description.length > 0);
-}
-
-function coerceDetectedItem(raw: Record<string, unknown>): DetectedItem {
-  const colours = isRecord(raw.colours) ? raw.colours : {};
-  const category = asString(raw.category).toLowerCase();
-  return {
-    name: asString(raw.name).slice(0, 120),
-    category: isCategory(category) ? category : "accessory",
-    subcategory: asString(raw.subcategory).slice(0, 80),
-    colours: {
-      primary: asString(colours.primary).slice(0, 40) || "unknown",
-      secondary: asStringArray(colours.secondary, 6).map((colour) => colour.slice(0, 40)),
-      hex: [],
-    },
-    pattern: asString(raw.pattern).slice(0, 60) || "solid",
-    material: asString(raw.material_guess ?? raw.material).slice(0, 60) || "unknown",
-    season: asSeasons(raw.season),
-    formality: asFormality(raw.formality),
-    description: asString(raw.description).slice(0, 400),
-    bbox: asBbox(raw.bbox),
-  };
-}
-
-function asSeasons(value: unknown): Season[] {
-  const seasons = asStringArray(value, SEASONS.length)
-    .map((season) => season.toLowerCase())
-    .filter((season): season is Season => (SEASONS as readonly string[]).includes(season));
-  const unique = [...new Set(seasons)];
-  return unique.length > 0 ? unique : [...SEASONS];
-}
-
-function asFormality(value: unknown): Formality {
-  const formality = asString(value).toLowerCase();
-  return (FORMALITY as readonly string[]).includes(formality) ? (formality as Formality) : "casual";
-}
-
-/** [x0, y0, x1, y1] as 0–1 fractions; anything else falls back to the whole frame. */
-function asBbox(value: unknown): number[] {
-  if (!Array.isArray(value) || value.length !== 4) return [0, 0, 1, 1];
-  const box = value.map((part) =>
-    typeof part === "number" && Number.isFinite(part) ? Math.min(1, Math.max(0, part)) : Number.NaN,
-  );
-  if (box.some((part) => Number.isNaN(part))) return [0, 0, 1, 1];
-  return box;
-}
-
-function asStringArray(value: unknown, limit: number): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((part): part is string => typeof part === "string" && part.trim().length > 0).slice(0, limit);
-}
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** A short, human-readable reason for the job stepper — never a stack trace. */

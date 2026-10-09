@@ -34,15 +34,16 @@ const adviceModel = await import("../convex/model/shoppingAdvice.ts");
 const shopping = await import("../convex/shoppingAdvice.ts");
 const backfill = await import("../convex/embeddingBackfill.ts");
 
-const readSource = (relative) =>
-  readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
+const readSource = (relative) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 const corpus = JSON.parse(readSource("../bench/embeddings/corpus.json"));
 const unit384 = () => {
   const vector = new Array(384).fill(0);
   vector[0] = 1;
   return vector;
 };
-const fakeTransport = (status, payload = {}) => async () => ({ status, json: async () => payload });
+const fakeTransport =
+  (status, payload = {}) =>
+  async () => ({ status, json: async () => payload });
 const fakeQueryCtx = (row) => ({
   db: {
     query: () => ({
@@ -77,7 +78,10 @@ test("all 16 frozen strings are byte-identical through the shared production bui
 
 test("the provider seam fails closed with no implicit provider", () => {
   for (const env of [{}, { EMBEDDING_PROVIDER: "" }, { EMBEDDING_PROVIDER: "fallback" }]) {
-    assert.throws(() => seam.embeddingProvider(env), (error) => error instanceof seam.EmbeddingError);
+    assert.throws(
+      () => seam.embeddingProvider(env),
+      (error) => error instanceof seam.EmbeddingError,
+    );
   }
   assert.equal(seam.embeddingProvider({ EMBEDDING_PROVIDER: "local" }), "local");
   assert.equal(seam.embeddingProvider({ EMBEDDING_PROVIDER: "openai" }), "openai");
@@ -135,9 +139,18 @@ test("a successful local embedding costs exactly $0 and returns a validated 384-
 
 test("a busy gateway is rate-limited and retryable; a failed gateway is transient and retryable", async () => {
   const config = { baseUrl: "https://bge.invalid", apiKey: "k", timeoutMs: 1000 };
-  await assert.rejects(seam.localEmbed({ text: "x" }, config, fakeTransport(503, {})), (error) => error.kind === "rate-limited" && error.retryable === true);
-  await assert.rejects(seam.localEmbed({ text: "x" }, config, fakeTransport(500, {})), (error) => error.kind === "transient" && error.retryable === true);
-  await assert.rejects(seam.localEmbed({ text: "x" }, config, fakeTransport(401, {})), (error) => error.kind === "auth-config" && error.retryable === false);
+  await assert.rejects(
+    seam.localEmbed({ text: "x" }, config, fakeTransport(503, {})),
+    (error) => error.kind === "rate-limited" && error.retryable === true,
+  );
+  await assert.rejects(
+    seam.localEmbed({ text: "x" }, config, fakeTransport(500, {})),
+    (error) => error.kind === "transient" && error.retryable === true,
+  );
+  await assert.rejects(
+    seam.localEmbed({ text: "x" }, config, fakeTransport(401, {})),
+    (error) => error.kind === "auth-config" && error.retryable === false,
+  );
 });
 
 test("a local failure never invokes the OpenAI runner", async () => {
@@ -189,7 +202,14 @@ test("dimensions are static facts: local rejects OpenAI width, OpenAI keeps 1536
   const legacy = new Array(1536).fill(0);
   legacy[0] = 1;
   assert.equal(seam.validateEmbeddingVector("openai", legacy).length, 1536);
-  assert.throws(() => seam.validateEmbeddingVector("local", unit384().map(() => 0.1)), /L2 norm/);
+  assert.throws(
+    () =>
+      seam.validateEmbeddingVector(
+        "local",
+        unit384().map(() => 0.1),
+      ),
+    /L2 norm/,
+  );
   // Audited: there is NO correct embedding price in usageToUsd (its textIn rate is the image-model
   // table; text-embedding-3-small lists at $0.02/M), so the legacy branch stays explicitly unpriced
   // exactly as before Phase C — and the final production path is local/$0 regardless.
@@ -209,12 +229,18 @@ test("the BGE reader uses pool 16, max 3, same-category-first order, and the B2 
     { item: { category: "dress" }, name: "second" },
     { item: { category: "coat" }, name: "third" },
   ]);
-  assert.deepEqual(reranked.map((entry) => entry.name), ["second", "first", "third"]);
+  assert.deepEqual(
+    reranked.map((entry) => entry.name),
+    ["second", "first", "third"],
+  );
   const shoppingSource = readSource("../convex/shoppingAdvice.ts");
   assert.ok(shoppingSource.includes('ctx.vectorSearch("itemEmbeddings", reader.indexName'));
   assert.ok(!shoppingSource.includes('"by_embeddingBge", {'), "no hardcoded BGE index at the search call");
   assert.ok(!shoppingSource.includes('"by_embedding", {'), "no hardcoded legacy index at the search call");
-  assert.ok(shoppingSource.includes("readGeneration: generation"), "context and hit-mapping share the resolved generation");
+  assert.ok(
+    shoppingSource.includes("readGeneration: generation"),
+    "context and hit-mapping share the resolved generation",
+  );
   const analyzeBody = shoppingSource.slice(shoppingSource.indexOf("export const analyze = action({"));
   assert.ok(
     analyzeBody.indexOf("embeddingReadGeneration()") < analyzeBody.indexOf("ctx.vectorSearch"),
@@ -240,19 +266,23 @@ test("candidate similarity reads one generation at a time and never mixes vector
   assert.deepEqual(bgeVector, [0.5, 0.5]);
   assert.notEqual(bgeVector, bothRow.embeddingBge);
   // A BGE-only row (new ingest during migration) has no legacy similarity result — accepted.
-  assert.equal(await adviceModel.getCandidateVector(fakeQueryCtx({ embeddingBge: [0.5, 0.5] }), "candidate", "legacy"), null);
+  assert.equal(
+    await adviceModel.getCandidateVector(fakeQueryCtx({ embeddingBge: [0.5, 0.5] }), "candidate", "legacy"),
+    null,
+  );
   // A not-yet-backfilled row under BGE reads likewise has none.
   assert.equal(await adviceModel.getCandidateVector(fakeQueryCtx({ embedding: [0.1, 0.2] }), "candidate", "bge"), null);
   // Omitted generation means the env default, which is legacy during migration.
   assert.deepEqual(await adviceModel.getCandidateVector(fakeQueryCtx(bothRow), "candidate"), [0.1, 0.2]);
 });
 
-test("itemReady accepts BGE only and cannot receive a duplicate assignment", () => {
+test("itemReady accepts optional BGE only and cannot receive a duplicate assignment", () => {
   const pipeline = readSource("../convex/ai/pipeline.ts");
   const start = pipeline.indexOf("export const itemReady = internalMutation({");
   const end = pipeline.indexOf("export const itemFailed = internalMutation({", start);
   const block = pipeline.slice(start, end);
-  assert.ok(block.includes("embeddingBge: v.array(v.float64())"));
+  assert.ok(block.includes("embeddingBge: v.optional(v.array(v.float64()))"));
+  assert.ok(block.includes("if (args.embeddingBge) await setItemEmbeddingBge"));
   assert.ok(!block.includes("duplicateOfId"));
   assert.ok(!block.includes("embedding: v.array"));
 });
@@ -261,7 +291,10 @@ test("the backfill is key-guarded, bounded, retryable by id, and local-only", as
   const prior = process.env.EMBEDDING_BACKFILL_KEY;
   process.env.EMBEDDING_BACKFILL_KEY = "test-backfill-key";
   try {
-    await assert.rejects(backfill.runBackfill._handler({}, { backfillKey: "wrong" }), (error) => error?.data?.code === "FORBIDDEN");
+    await assert.rejects(
+      backfill.runBackfill._handler({}, { backfillKey: "wrong" }),
+      (error) => error?.data?.code === "FORBIDDEN",
+    );
     await assert.rejects(
       backfill.runBackfill._handler({}, { backfillKey: "test-backfill-key", cursor: "x", retryItemIds: ["y"] }),
       (error) => error?.data?.code === "INVALID_INPUT",
@@ -320,9 +353,10 @@ test("STATE A — migration: BGE-only writes while shopping reads legacy vectors
   assert.deepEqual(calls, ["local"]);
   assert.equal(result.vector.length, 384);
   assert.equal(result.costUsd, 0);
-  // The ingest sink only accepts BGE and cannot assign a duplicate (asserted in full above too).
+  // Configured local ingest writes BGE; absent configuration skips it instead of selecting paid AI.
   const openaiSource = readSource("../convex/ai/openai.ts");
-  assert.ok(openaiSource.includes("embeddingBge: vector"));
+  assert.ok(openaiSource.includes('optionalEnv("EMBEDDING_PROVIDER")'));
+  assert.ok(openaiSource.includes("...(embeddingBge ? { embeddingBge } : {})"));
   // …while the reader stays on the legacy field/index until cutover.
   assert.equal(adviceModel.readGenerationConfig("legacy").vectorField, "embedding");
   assert.equal(adviceModel.readGenerationConfig("legacy").indexName, "by_embedding");

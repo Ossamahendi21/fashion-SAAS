@@ -33,13 +33,13 @@ Fitcheck brings together **image understanding, garment extraction, virtual try-
 
 3️⃣ Join my AI Community for FREE 👉 **[https://www.papareact.com/ztoh-form](https://www.papareact.com/ztoh-form)**
 
-| Service               | Its job in Fitcheck                                              | Needed for                                               |
-| --------------------- | ---------------------------------------------------------------- | -------------------------------------------------------- |
-| **Clerk**             | Sign-in, sessions and user subscription plans                    | Authentication; enable Billing for plan synchronization  |
-| **Convex**            | Database, file storage, reactive queries and durable workflows   | Wardrobe, outfits, credits and background jobs           |
-| **Vercel AI Gateway** | Routes the stylist model; can also handle the image pipeline     | The stylist; optionally all AI requests                  |
-| **OpenAI**            | Optional direct access for detection, image edits and embeddings | Use instead of Gateway for Convex AI actions             |
-| **Vercel**            | Hosts Next.js and the Eve service                                | Deployment                                               |
+| Service               | Its job in Fitcheck                                              | Needed for                                              |
+| --------------------- | ---------------------------------------------------------------- | ------------------------------------------------------- |
+| **Clerk**             | Sign-in, sessions and user subscription plans                    | Authentication; enable Billing for plan synchronization |
+| **Convex**            | Database, file storage, reactive queries and durable workflows   | Wardrobe, outfits, credits and background jobs          |
+| **Vercel AI Gateway** | Routes the stylist model; can also handle the image pipeline     | The stylist; optionally all AI requests                 |
+| **OpenAI**            | Optional direct access for detection, image edits and embeddings | Use instead of Gateway for Convex AI actions            |
+| **Vercel**            | Hosts Next.js and the Eve service                                | Deployment                                              |
 
 The Clerk link above is Sonny’s campaign link. Set up your own service accounts and credentials when running your copy.
 
@@ -179,16 +179,16 @@ The original stays available for review and later re-extraction. Upload timeouts
 
 ### 2. Detect the candidates
 
-`uploads.createBatch` starts a `scanUpload` workflow per photo. The vision call uses **`gpt-5-mini`** with a strict JSON schema. Each candidate includes:
+`uploads.createBatch` starts a `scanUpload` workflow per photo. The zero-provider fallback creates one deterministic full-frame candidate from each isolated-garment photo, using its filename and local colour sampling without an external inference call. Each candidate includes:
 
 - A short name, category and subcategory.
 - Primary/secondary colours, pattern and a material guess.
 - Seasons and formality.
 - A normalized bounding box and a description that identifies the piece in the original photo.
 
-Detection returns at most **12 candidates per photo**. Material and other visual attributes are model estimates, which you can correct later.
+The fallback returns exactly one candidate per photo. Automatic multi-garment detection remains unavailable until the self-hosted detector endpoint is deployed. Attributes are conservative defaults that can be corrected later.
 
-A successful scan stores the candidates and sets the upload to `awaiting_selection`. It creates **no wardrobe items and reserves no credits** at this stage. “Free scan” means no user credits are charged; the provider call still has a cost to the app operator.
+A successful scan stores the candidate and sets the upload to `awaiting_selection`. It creates **no wardrobe items and reserves no credits** at this stage. The fallback makes no provider call and records exactly `$0` external spend.
 
 ### 3. Confirm what belongs in the wardrobe
 
@@ -423,7 +423,7 @@ Public Convex functions resolve the authenticated user and scope records to that
 | `outfits`                         | Named slot compositions, proposals, saved state and wear dates              |
 | `renders`                         | Try-on outputs, quality, status, usage and optional share token             |
 | `jobs`                            | Workflow steps, reservations, refunds, outcome and result references        |
-| `creditLedger`                    | Idempotent grants, spending, refunds and existing purchase history                           |
+| `creditLedger`                    | Idempotent grants, spending, refunds and existing purchase history          |
 | `threads`                         | Owned stylist threads and verified Eve session bindings                     |
 | `proposals`                       | Links between stylist conversations, outfits and render jobs                |
 | `systemCounters`, `usageCounters` | Global accounting and per-user daily limits                                 |
@@ -443,7 +443,7 @@ The full schema and indexes are in [`convex/schema.ts`](convex/schema.ts). Busin
 | `/outfits`, `/outfits/new`, `/outfits/[outfitId]` | Saved outfits and the outfit studio                       |
 | `/stylist`, `/stylist/[threadId]`                 | Conversation list and standalone stylist                  |
 | `/lookbook`                                       | Generated try-ons                                         |
-| `/billing`                                        | Clerk plans, balance and ledger                    |
+| `/billing`                                        | Clerk plans, balance and ledger                           |
 | `/settings`                                       | Preferences, avatars and data controls                    |
 | `/share/[token]`                                  | Publicly shared render                                    |
 | `/admin`                                          | Authorized operational dashboard                          |
@@ -515,7 +515,7 @@ openssl rand -hex 32
 
 Store it privately as `AGENT_SERVICE_KEY` in **both** `.env.local` and your Convex deployment. It authorizes the Eve service to call the app’s scoped agent functions.
 
-For local Eve development, add `AI_GATEWAY_API_KEY` to `.env.local`. For Convex AI actions, choose one provider configuration:
+The deterministic stylist and zero-provider Add Clothes fallback require no AI Gateway credential. Legacy paid Convex AI actions remain fail-closed unless an operator explicitly configures one of these rollback credentials:
 
 - Set `AI_GATEWAY_API_KEY` on Convex to route detection, images and embeddings through Gateway; or
 - Set `OPENAI_API_KEY` on Convex for direct OpenAI access.
@@ -564,21 +564,21 @@ Sign up, upload a supported personal photo, select men’s or women’s wardrobe
 
 ### Environment reference
 
-| Variable                            | Next.js / Eve (`.env.local`, then Vercel)                                     | Convex deployment                                        |
-| ----------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `NEXT_PUBLIC_CONVEX_URL`            | Required; the intended backend URL, also read by agent tools                  | —                                                        |
-| `CONVEX_DEPLOYMENT`                 | Local CLI selector written by Convex                                          | —                                                        |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Required; public Clerk instance identifier                                    | —                                                        |
-| `CLERK_SECRET_KEY`                  | Required for server/Eve authentication                                        | Required for subscription SDK reads                      |
-| `CLERK_JWT_ISSUER_DOMAIN`           | —                                                                             | Required; exact Clerk issuer URL                         |
-| `NEXT_PUBLIC_CLERK_*_URL` settings  | Keep the routes provided in `.env.example`                                    | —                                                        |
-| `AI_GATEWAY_API_KEY`                | Stylist credentials locally; hosted Eve can use Vercel OIDC                   | Required for AI actions unless using `OPENAI_API_KEY`    |
-| `OPENAI_API_KEY`                    | Not used by the stylist configuration                                         | Optional direct provider; takes precedence over Gateway  |
-| `AGENT_SERVICE_KEY`                 | Required; keep server-side                                                    | Required; must match Eve                                 |
+| Variable                            | Next.js / Eve (`.env.local`, then Vercel)                                     | Convex deployment                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `NEXT_PUBLIC_CONVEX_URL`            | Required; the intended backend URL, also read by agent tools                  | —                                                          |
+| `CONVEX_DEPLOYMENT`                 | Local CLI selector written by Convex                                          | —                                                          |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Required; public Clerk instance identifier                                    | —                                                          |
+| `CLERK_SECRET_KEY`                  | Required for server/Eve authentication                                        | Required for subscription SDK reads                        |
+| `CLERK_JWT_ISSUER_DOMAIN`           | —                                                                             | Required; exact Clerk issuer URL                           |
+| `NEXT_PUBLIC_CLERK_*_URL` settings  | Keep the routes provided in `.env.example`                                    | —                                                          |
+| `AI_GATEWAY_API_KEY`                | Stylist credentials locally; hosted Eve can use Vercel OIDC                   | Required for AI actions unless using `OPENAI_API_KEY`      |
+| `OPENAI_API_KEY`                    | Not used by the stylist configuration                                         | Optional direct provider; takes precedence over Gateway    |
+| `AGENT_SERVICE_KEY`                 | Required; keep server-side                                                    | Required; must match Eve                                   |
 | `SITE_URL`                          | Optional allowed-origin restriction for Eve token verification                | Required for demo wardrobe images; use the frontend origin |
-| `MAX_DAILY_SPEND_USD`               | —                                                                             | Operator spend guard; set explicitly                     |
-| `AGENT_DEV_CLERK_USER_ID`           | Optional explicit local `eve dev` identity; unnecessary for signed-in app use | —                                                        |
-| `ALLOW_DEV_SMOKE`                   | —                                                                             | Scratch deployments only; enables internal smoke helpers |
+| `MAX_DAILY_SPEND_USD`               | —                                                                             | Operator spend guard; set explicitly                       |
+| `AGENT_DEV_CLERK_USER_ID`           | Optional explicit local `eve dev` identity; unnecessary for signed-in app use | —                                                          |
+| `ALLOW_DEV_SMOKE`                   | —                                                                             | Scratch deployments only; enables internal smoke helpers   |
 
 Hosted Eve can use Vercel OIDC, but **Convex is a separate runtime and still needs an explicit AI key**. See [AI Gateway authentication](https://vercel.com/docs/ai-gateway/authentication-and-byok). Never put server secrets in variables prefixed `NEXT_PUBLIC_`.
 
@@ -600,17 +600,17 @@ Hosted Eve can use Vercel OIDC, but **Convex is a separate runtime and still nee
 
 ## 🎬 Demo Walkthrough
 
-| Step | What to do                                                       | What it demonstrates                                                |
-| ---- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 1    | Sign in and complete photo/wardrobe preferences                  | Clerk identity and onboarding                                       |
-| 2    | Seed the men’s or women’s demo wardrobe                          | Useful first-run data without an AI charge                          |
-| 3    | Upload a photo containing several garments                       | A real free vision scan                                             |
-| 4    | Choose just one garment and confirm its credit quote             | Human selection before paid extraction                              |
-| 5    | Open the new piece and correct an attribute                      | Editable model output                                               |
-| 6    | Create an outfit and choose its pieces                           | Structured composition from owned items                             |
-| 7    | Open Ask stylist and ask “How could I dress this up for dinner?” | Contextual tools and grounded recommendations                       |
-| 8    | Ask “Show me wearing it” and approve the displayed cost          | Quote, approval and durable generation                              |
-| 9    | Navigate away while it renders, then open Activity/Lookbook      | Realtime progress independent of the current page                   |
+| Step | What to do                                                       | What it demonstrates                                 |
+| ---- | ---------------------------------------------------------------- | ---------------------------------------------------- |
+| 1    | Sign in and complete photo/wardrobe preferences                  | Clerk identity and onboarding                        |
+| 2    | Seed the men’s or women’s demo wardrobe                          | Useful first-run data without an AI charge           |
+| 3    | Upload a photo containing several garments                       | A real free vision scan                              |
+| 4    | Choose just one garment and confirm its credit quote             | Human selection before paid extraction               |
+| 5    | Open the new piece and correct an attribute                      | Editable model output                                |
+| 6    | Create an outfit and choose its pieces                           | Structured composition from owned items              |
+| 7    | Open Ask stylist and ask “How could I dress this up for dinner?” | Contextual tools and grounded recommendations        |
+| 8    | Ask “Show me wearing it” and approve the displayed cost          | Quote, approval and durable generation               |
+| 9    | Navigate away while it renders, then open Activity/Lookbook      | Realtime progress independent of the current page    |
 | 10   | Inspect Billing                                                  | Clerk plans, credit allowances, spending and refunds |
 
 Choose your own or permitted photos. A clear, complete personal photo gives the renderer more useful proportions than a tightly cropped portrait. Results can vary; use the actual generated result in a demonstration rather than promising a particular image.
@@ -730,7 +730,7 @@ Eve’s built server normally uses port 4274. Optional `EVE_NEXT_PRODUCTION_ORIG
 | “Invalid image file or mode”                            | Use a valid still JPEG/PNG/WebP. Current image actions normalize actual bytes before sending them. Re-upload a damaged file; changing its extension will not convert it.                   |
 | A phone photo is rejected                               | HEIC and multi-frame images are unsupported. Export a JPEG/PNG/WebP, or use the phone’s compatible JPEG capture option.                                                                    |
 | Scan finishes but nothing appears in the wardrobe       | Open the photo’s review and select the pieces to import. The free scan intentionally stops before extraction.                                                                              |
-| Import waits for credits                                | Check both total balance and today’s allowance. A plan change does not bypass the daily cap. Resume only the remaining selected pieces when credits are available.                                                            |
+| Import waits for credits                                | Check both total balance and today’s allowance. A plan change does not bypass the daily cap. Resume only the remaining selected pieces when credits are available.                         |
 | A render is still active                                | Inspect actual steps and retries in Activity. Historical duration guidance is not a deadline; provider latency varies.                                                                     |
 | The try-on includes a garment you did not select        | Empty core slots can receive neutral prompt fallbacks. Populate the outfit’s top/bottom/shoes if you need those specific pieces represented.                                               |
 | Head size or body proportions look wrong                | Use a clear, uncropped personal photo. Prompts request natural proportions, but generative results can still vary. Compare another render rather than treating a preview as a measurement. |
@@ -815,7 +815,7 @@ public/
 | [`AGENTS.md`](AGENTS.md)                                                                     | Repository conventions and installed-version caveats         |
 | [`DESIGN.md`](DESIGN.md)                                                                     | Visual direction                                             |
 | [`.env.example`](.env.example)                                                               | Environment ownership and optional switches                  |
-| [`convex/shared/credits.ts`](convex/shared/credits.ts)                                       | Plans, limits and credit-cost calculations                |
+| [`convex/shared/credits.ts`](convex/shared/credits.ts)                                       | Plans, limits and credit-cost calculations                   |
 | [`convex/model/credits.ts`](convex/model/credits.ts)                                         | Reservation, refund and ledger behavior                      |
 | [`convex/subscriptions.ts`](convex/subscriptions.ts)                                         | SDK-derived subscription state                               |
 | [`convex/workflows/manager.ts`](convex/workflows/manager.ts)                                 | Retry and concurrency configuration                          |

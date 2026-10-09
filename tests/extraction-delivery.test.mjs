@@ -36,7 +36,14 @@ const { usageToUsd } = await import("../convex/shared/credits.ts");
 
 const sharp = (await import("sharp")).default;
 const pngBytes = async ({ width = 64, height = 64, rgba = true } = {}) =>
-  sharp({ create: { width, height, channels: rgba ? 4 : 3, background: rgba ? { r: 30, g: 60, b: 90, alpha: 1 } : { r: 30, g: 60, b: 90 } } })
+  sharp({
+    create: {
+      width,
+      height,
+      channels: rgba ? 4 : 3,
+      background: rgba ? { r: 30, g: 60, b: 90, alpha: 1 } : { r: 30, g: 60, b: 90 },
+    },
+  })
     .png()
     .toBuffer();
 
@@ -68,8 +75,7 @@ function dbFixture() {
     },
     query(table) {
       const filters = [];
-      const selected = () =>
-        tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
+      const selected = () => tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
       const query = {
         withIndex(_name, build) {
           const index = {
@@ -139,16 +145,26 @@ test("extractGarmentCutout routes EXTRACTION_PROVIDER=openai to the openai runne
     openai: async (request) => {
       called.push("openai");
       assert.ok(request.imageBytes.length > 0);
-      return { bytes: toU8(await pngBytes({ width: 1024, height: 1024 })), usage: SOME_USAGE, background: "transparent", costUsd: usageToUsd(SOME_USAGE), latencyMs: 10 };
+      return {
+        bytes: toU8(await pngBytes({ width: 1024, height: 1024 })),
+        usage: SOME_USAGE,
+        background: "transparent",
+        costUsd: usageToUsd(SOME_USAGE),
+        latencyMs: 10,
+      };
     },
     withoutbg: async () => {
       called.push("withoutbg");
       throw new Error("should not run");
     },
   };
-  const result = await extractGarmentCutout({ imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p" }, runners, {
-    EXTRACTION_PROVIDER: "openai",
-  });
+  const result = await extractGarmentCutout(
+    { imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p" },
+    runners,
+    {
+      EXTRACTION_PROVIDER: "openai",
+    },
+  );
   assert.deepEqual(called, ["openai"]);
   assert.equal(result.provider, "openai");
   assert.deepEqual(result.usage, SOME_USAGE);
@@ -166,12 +182,21 @@ test("extractGarmentCutout routes EXTRACTION_PROVIDER=withoutbg to the withoutbg
     },
     withoutbg: async () => {
       called.push("withoutbg");
-      return { bytes: toU8(await pngBytes({ width: 300, height: 200 })), background: "transparent", costUsd: 0.002, latencyMs: 9 };
+      return {
+        bytes: toU8(await pngBytes({ width: 300, height: 200 })),
+        background: "transparent",
+        costUsd: 0.002,
+        latencyMs: 9,
+      };
     },
   };
-  const result = await extractGarmentCutout({ imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p" }, runners, {
-    EXTRACTION_PROVIDER: "withoutbg",
-  });
+  const result = await extractGarmentCutout(
+    { imageBytes: toU8(await pngBytes()), imageName: "photo", prompt: "p" },
+    runners,
+    {
+      EXTRACTION_PROVIDER: "withoutbg",
+    },
+  );
   assert.deepEqual(called, ["withoutbg"]);
   assert.equal(result.provider, "withoutbg");
   assert.equal("usage" in result, false);
@@ -254,7 +279,14 @@ test("itemReady with token usage keeps the existing usage-to-COGS accounting", a
 });
 
 test("the extraction env keys are typed server env keys", () => {
-  for (const key of ["EXTRACTION_PROVIDER", "WITHOUTBG_BASE_URL", "WITHOUTBG_API_KEY", "WITHOUTBG_COST_USD_PER_IMAGE", "FLORENCESAM_BASE_URL", "FLORENCESAM_API_KEY"]) {
+  for (const key of [
+    "EXTRACTION_PROVIDER",
+    "WITHOUTBG_BASE_URL",
+    "WITHOUTBG_API_KEY",
+    "WITHOUTBG_COST_USD_PER_IMAGE",
+    "FLORENCESAM_BASE_URL",
+    "FLORENCESAM_API_KEY",
+  ]) {
     assert.ok(SERVER_ENV_KEYS.includes(key), `${key} must be a typed ServerEnvKey`);
   }
 });
@@ -269,7 +301,13 @@ test("WITHOUTBG_* secrets never reach the client bundle", () => {
       if (entry.isDirectory()) walk(full);
       else if (/\.(ts|tsx)$/.test(entry.name)) {
         const text = readFileSync(full, "utf8");
-        for (const needle of ["WITHOUTBG_API_KEY", "WITHOUTBG_BASE_URL", "FLORENCESAM_API_KEY", "FLORENCESAM_BASE_URL", "NEXT_PUBLIC_EXTRACTION_PROVIDER"]) {
+        for (const needle of [
+          "WITHOUTBG_API_KEY",
+          "WITHOUTBG_BASE_URL",
+          "FLORENCESAM_API_KEY",
+          "FLORENCESAM_BASE_URL",
+          "NEXT_PUBLIC_EXTRACTION_PROVIDER",
+        ]) {
           if (text.includes(needle)) offenders.push(`${full}: ${needle}`);
         }
       }
@@ -283,10 +321,13 @@ test("the extraction seam lives inside the single extractItem action; workflows 
   const openai = readFileSync(fileURLToPath(new URL("../convex/ai/openai.ts", import.meta.url)), "utf8");
   assert.ok(openai.includes(`from "./extraction"`), "openai.ts must consume the seam");
   const ingest = readFileSync(fileURLToPath(new URL("../convex/workflows/ingest.ts", import.meta.url)), "utf8");
-  assert.ok(ingest.includes("internal.ai.openai.extractItem"), "the workflow must still call the single extraction entry");
+  assert.ok(
+    ingest.includes("internal.ai.openai.extractItem"),
+    "the workflow must still call the single extraction entry",
+  );
 });
 
-test("extractGarmentCutout defaults to florencesam, normalizes to 1024×1024, and reports $0 spend", async () => {
+test("extractGarmentCutout defaults to the original image, normalizes to 1024×1024, and reports $0 spend", async () => {
   const called = [];
   const runners = {
     openai: async () => {
@@ -299,7 +340,12 @@ test("extractGarmentCutout defaults to florencesam, normalizes to 1024×1024, an
     },
     florencesam: async () => {
       called.push("florencesam");
-      return { bytes: toU8(await pngBytes({ width: 300, height: 200 })), background: "transparent", costUsd: 0, latencyMs: 9 };
+      return {
+        bytes: toU8(await pngBytes({ width: 300, height: 200 })),
+        background: "transparent",
+        costUsd: 0,
+        latencyMs: 9,
+      };
     },
   };
   const result = await extractGarmentCutout(
@@ -307,8 +353,8 @@ test("extractGarmentCutout defaults to florencesam, normalizes to 1024×1024, an
     runners,
     {},
   );
-  assert.deepEqual(called, ["florencesam"]);
-  assert.equal(result.provider, "florencesam");
+  assert.deepEqual(called, []);
+  assert.equal(result.provider, "original");
   assert.equal("usage" in result, false);
   assert.equal(result.costUsd, 0);
   assert.equal(result.width, 1024, "the cutout contract is enforced for every provider");
