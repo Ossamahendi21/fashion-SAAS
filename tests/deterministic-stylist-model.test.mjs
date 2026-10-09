@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultMessageReducer } from "eve/client";
 
 import { EMPTY_STYLIST_STATE } from "../agent/lib/stylist-state.ts";
 import {
@@ -11,6 +12,7 @@ import {
   planStylistModelStep,
 } from "../agent/lib/deterministic-stylist-model.ts";
 import { createDeterministicStylistCanary } from "../agent/lib/deterministic-stylist-canary.ts";
+const { activityState, summarizeActivity } = await import("../src/components/stylist/tool-activity-state.ts");
 
 /**
  * Step 7 Phase C7B — the deterministic transport adapter and the canary tool loop.
@@ -376,10 +378,38 @@ test("other tools and result parts never shift the stylist call counter", () => 
   assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn");
 });
 
+test("later stylist ids skip a call id already owned by an unrelated framework tool", () => {
+  const prompt = [
+    user("a"),
+    assistantCall("call_stylist_turn"),
+    toolResult({ response: "done" }),
+    assistantCall("call_stylist_turn_2", "ask_question"),
+    user("b"),
+  ];
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_3");
+});
+
 test("id derivation is deterministic for the same prompt", () => {
   const prompt = [user("a"), assistantCall("call_stylist_turn"), user("b")];
   assert.equal(nextStylistToolCallId(prompt), nextStylistToolCallId(prompt));
   assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
+});
+
+test("id derivation never reads the clock, randomness or user prose as a call id", () => {
+  const originalNow = Date.now;
+  const originalRandom = Math.random;
+  Date.now = () => {
+    throw new Error("clock read");
+  };
+  Math.random = () => {
+    throw new Error("random read");
+  };
+  try {
+    assert.equal(nextStylistToolCallId([user("use call_stylist_turn_99")]), "call_stylist_turn");
+  } finally {
+    Date.now = originalNow;
+    Math.random = originalRandom;
+  }
 });
 
 test("six consecutive turns yield six distinct stable ids", () => {
@@ -411,6 +441,28 @@ test("a failed turn still consumes its call id so the next turn cannot collide",
   assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
 });
 
+test("approval-capable tool history does not collide with stylist result identity", () => {
+  const prompt = [
+    user("a"),
+    assistantCall("call_stylist_turn"),
+    toolResult({ response: "done" }),
+    assistantCall("call_start_renders", "start_renders"),
+    {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call_start_renders",
+          toolName: "start_renders",
+          output: { type: "execution-denied" },
+        },
+      ],
+    },
+    user("b"),
+  ];
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
+});
+
 test("reconstructed history with interleaved content counts identically", () => {
   const prompt = [
     user("a"),
@@ -420,4 +472,88 @@ test("reconstructed history with interleaved content counts identically", () => 
     user("b"),
   ];
   assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
+});
+
+test("six stylist turns bind six results through the real Eve reducer and activity mapper", () => {
+  const reducer = defaultMessageReducer();
+  const events = [];
+  const prompt = [];
+  const callIds = [];
+
+  for (let index = 0; index < 6; index += 1) {
+    const turn = index + 1;
+    const turnId = `turn-${turn}`;
+    prompt.push(user(`request ${turn}`));
+    const callId = nextStylistToolCallId(prompt);
+    callIds.push(callId);
+    prompt.push(assistantCall(callId));
+    const output = {
+      kind: "recommendation",
+      stage: "PROPOSED",
+      summary: `Completed stylist turn ${turn}.`,
+      response: `Response for turn ${turn}.`,
+    };
+    prompt.push({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: callId,
+          toolName: STYLIST_TURN_TOOL_NAME,
+          output: { type: "json", value: output },
+        },
+      ],
+    });
+    events.push(
+      { type: "step.started", data: { turnId, stepIndex: 0 } },
+      {
+        type: "actions.requested",
+        data: {
+          turnId,
+          stepIndex: 0,
+          actions: [
+            {
+              callId,
+              kind: "tool-call",
+              toolName: STYLIST_TURN_TOOL_NAME,
+              input: { turn: { intent: "recommend", marker: turn } },
+            },
+          ],
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          turnId,
+          stepIndex: 0,
+          result: { callId, kind: "tool-result", toolName: STYLIST_TURN_TOOL_NAME, output },
+          status: "completed",
+        },
+      },
+      { type: "turn.completed", data: { turnId } },
+    );
+  }
+
+  const replay = () => events.reduce((data, event) => reducer.reduce(data, event), reducer.initial());
+  const first = replay();
+  assert.deepEqual(replay(), first, "replaying the same durable event history is stable");
+  assert.equal(new Set(callIds).size, 6);
+
+  const parts = first.messages
+    .filter((message) => message.role === "assistant")
+    .flatMap((message) =>
+      message.parts.filter((part) => part.type === "dynamic-tool").map((part) => ({ message, part })),
+    );
+  assert.equal(parts.length, 6);
+  for (const [index, { message, part }] of parts.entries()) {
+    const turn = index + 1;
+    assert.equal(message.metadata.turnId, `turn-${turn}`);
+    assert.equal(part.toolCallId, callIds[index]);
+    assert.equal(part.state, "output-available");
+    assert.equal(part.output.summary, `Completed stylist turn ${turn}.`);
+    assert.equal(activityState(part, false), "done");
+    const [row] = summarizeActivity([part], false);
+    assert.equal(row.state, "done");
+    assert.doesNotMatch(JSON.stringify(row), /No result received|Paused/);
+  }
 });

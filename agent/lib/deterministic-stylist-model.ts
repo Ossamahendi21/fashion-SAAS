@@ -74,25 +74,34 @@ export function planStylistModelStep(prompt: LanguageModelV4Prompt): StylistMode
  * session. A fixed id makes every later turn's result attach to the FIRST turn's part, so those
  * turns read as perpetually resultless in any client. The id stays fully deterministic: the
  * count of prior `stylist_turn` calls already in the prompt, keeping the historical bare id for
- * the first turn so existing single-turn behavior and captures are unchanged.
+ * the first turn so existing single-turn behavior and captures are unchanged. Later turns skip an
+ * id already occupied by any tool because Eve's client reducer keys all dynamic-tool parts globally
+ * by call id rather than by tool name.
  */
 export function nextStylistToolCallId(prompt: LanguageModelV4Prompt): string {
   let prior = 0;
+  const usedCallIds = new Set<string>();
   for (const message of prompt) {
     const content: unknown = (message as { content?: unknown }).content;
     if (!Array.isArray(content)) continue;
     for (const part of content) {
-      if (
-        typeof part === "object" &&
-        part !== null &&
-        (part as { type?: unknown }).type === "tool-call" &&
-        (part as { toolName?: unknown }).toolName === STYLIST_TURN_TOOL_NAME
-      ) {
+      if (typeof part !== "object" || part === null || (part as { type?: unknown }).type !== "tool-call") continue;
+      const toolCallId = (part as { toolCallId?: unknown }).toolCallId;
+      if (typeof toolCallId === "string") usedCallIds.add(toolCallId);
+      if ((part as { toolName?: unknown }).toolName === STYLIST_TURN_TOOL_NAME) {
         prior += 1;
       }
     }
   }
-  return prior === 0 ? `call_${STYLIST_TURN_TOOL_NAME}` : `call_${STYLIST_TURN_TOOL_NAME}_${prior + 1}`;
+  if (prior === 0) return `call_${STYLIST_TURN_TOOL_NAME}`;
+
+  let ordinal = prior + 1;
+  let candidate = `call_${STYLIST_TURN_TOOL_NAME}_${ordinal}`;
+  while (usedCallIds.has(candidate)) {
+    ordinal += 1;
+    candidate = `call_${STYLIST_TURN_TOOL_NAME}_${ordinal}`;
+  }
+  return candidate;
 }
 
 /** The latest authored user-message text, or `null` when the prompt carries no user text. */
