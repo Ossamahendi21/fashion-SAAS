@@ -31,8 +31,7 @@ import {
   withoutBgExtract,
 } from "./extraction";
 import { normalizeImageInput } from "./image_input";
-import { compositeOutfitImage } from "./composite";
-import { renderOutfitImage } from "./rendering";
+import { renderOutfitImage, type RenderRequest, type RenderRunnerResult } from "./rendering";
 import {
   coerceAdviceResponse,
   coerceStylingResponse,
@@ -445,13 +444,12 @@ export const renderImage = internalAction({
 
       const person = { bytes: await normalizeImageInput(avatar, "profile photo"), name: "person" };
       // Decode one reference at a time to bound memory for large photos and layered outfits.
-      const garmentRefs: Array<{ bytes: Uint8Array; name: string; slot: Slot }> = [];
+      const garmentRefs: Array<{ bytes: Uint8Array; name: string }> = [];
       for (const [index, blob] of blobs.entries()) {
         if (blob) {
           garmentRefs.push({
             bytes: await normalizeImageInput(blob, `garment-${index + 1}`),
             name: `garment-${index + 1}`,
-            slot: garments[index].slot,
           });
         }
       }
@@ -466,7 +464,7 @@ export const renderImage = internalAction({
 
       const result = await renderOutfitImage(
         { person, garments: garmentRefs, prompt, quality: context.quality },
-        { composite: compositeOutfitImage },
+        { openai: renderOpenaiImage },
       );
       const storageId = await ctx.storage.store(pngBlob(result.bytes));
 
@@ -578,6 +576,26 @@ function imageUsage(usage: ImagesResponse["usage"]): TokenUsage {
     inputImageTokens: usage?.input_tokens_details?.image_tokens ?? 0,
     outputTokens: usage?.output_tokens ?? 0,
   };
+}
+
+/**
+ * The only implemented render runner: gpt-image-2 edit at 1024x1536, medium/high mapped
+ * from the billing quality, PNG output, costed from real SDK token usage.
+ */
+async function renderOpenaiImage(request: RenderRequest): Promise<RenderRunnerResult> {
+  const started = Date.now();
+  const files = [await toFile(request.person.bytes, `${request.person.name}.png`, { type: "image/png" })];
+  for (const garment of request.garments) {
+    files.push(await toFile(garment.bytes, `${garment.name}.png`, { type: "image/png" }));
+  }
+  const response = await editImage({
+    image: files,
+    prompt: request.prompt,
+    size: "1024x1536",
+    quality: request.quality === "hq" ? "high" : "medium",
+  });
+  const { bytes, usage } = decodeImage(response);
+  return { bytes, usage, costUsd: usageToUsd(usage), latencyMs: Date.now() - started };
 }
 
 /**
