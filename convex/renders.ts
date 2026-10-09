@@ -15,7 +15,6 @@ import {
   toRenderView,
 } from "./model/renders";
 import { vRenderQuality } from "./shared/validators";
-import { isRenderRuntimeEnabled, RENDER_UNAVAILABLE_REASON } from "./shared/render_policy";
 import { vItemSummary, vOutfitView, vPaginated, vRenderView } from "./views";
 
 /**
@@ -36,17 +35,6 @@ export const start = mutation({
   handler: async (ctx, args) => {
     const user = await requireOnboarded(ctx);
     return startRenderJob(ctx, user, args);
-  },
-});
-
-/** Public UI capability backed by the same fail-closed policy as startRenderJob. */
-export const availability = query({
-  args: {},
-  returns: v.object({ enabled: v.boolean(), reason: v.string() }),
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    const enabled = isRenderRuntimeEnabled(process.env);
-    return { enabled, reason: enabled ? "" : RENDER_UNAVAILABLE_REASON };
   },
 });
 

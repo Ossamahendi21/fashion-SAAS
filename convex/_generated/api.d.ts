@@ -57,7 +57,6 @@ import type * as shared_credits from "../shared/credits.js";
 import type * as shared_demo_wardrobe from "../shared/demo_wardrobe.js";
 import type * as shared_embeddingText from "../shared/embeddingText.js";
 import type * as shared_jobs from "../shared/jobs.js";
-import type * as shared_render_policy from "../shared/render_policy.js";
 import type * as shared_validators from "../shared/validators.js";
 import type * as shared_wardrobe from "../shared/wardrobe.js";
 import type * as shoppingAdvice from "../shoppingAdvice.js";
@@ -130,7 +129,6 @@ declare const fullApi: ApiFromModules<{
   "shared/demo_wardrobe": typeof shared_demo_wardrobe;
   "shared/embeddingText": typeof shared_embeddingText;
   "shared/jobs": typeof shared_jobs;
-  "shared/render_policy": typeof shared_render_policy;
   "shared/validators": typeof shared_validators;
   "shared/wardrobe": typeof shared_wardrobe;
   shoppingAdvice: typeof shoppingAdvice;

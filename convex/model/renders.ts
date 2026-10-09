@@ -13,7 +13,6 @@ import {
   type TokenUsage,
 } from "../shared/credits";
 import { RENDER_STEPS } from "../shared/jobs";
-import { isRenderRuntimeEnabled, RENDER_FAILED_MESSAGE, RENDER_UNAVAILABLE_REASON } from "../shared/render_policy";
 import type { RenderView } from "../views";
 import { resolveAvatar } from "./avatars";
 import { assertFreshBilling, hasCurrentFeature, reserve, shortfallError } from "./credits";
@@ -44,8 +43,7 @@ export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?
     url: render.storageId ? await ctx.storage.getUrl(render.storageId) : null,
     creditsCharged: render.creditsCharged,
     shareToken: render.shareToken,
-    // Persist the diagnostic for admins, but never send provider/configuration details to a user.
-    error: render.status === "failed" ? RENDER_FAILED_MESSAGE : undefined,
+    error: render.error,
     createdAt: render.createdAt,
     completedAt: render.completedAt,
   };
@@ -134,10 +132,6 @@ export async function startRenderJob(
   user: Doc<"users">,
   input: StartRenderInput,
 ): Promise<{ jobId: Id<"jobs">; renderIds: Id<"renders">[] }> {
-  // This must remain the first operation: disabled rendering creates no job, reservation, or row.
-  if (!isRenderRuntimeEnabled(process.env)) {
-    throw appError("FEATURE_LOCKED", RENDER_UNAVAILABLE_REASON);
-  }
   const count = Math.trunc(input.count);
   if (!Number.isFinite(count) || count < 1 || count > LIMITS.maxRendersPerRequest) {
     throw appError("INVALID_INPUT", `Choose between 1 and ${LIMITS.maxRendersPerRequest} images.`, {

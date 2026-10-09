@@ -1,4 +1,4 @@
-// Render provider seam (Phase A): disabled-by-default/explicit openai, fail-closed selection, single-provider
+// Render provider seam (Phase A): default/explicit openai, fail-closed selection, single-provider
 // dispatch with no fallback, OpenAI usage/cost passthrough unchanged, and settlement that
 // represents a hypothetical usage-absent $0 result without fabricating token usage.
 // No network calls anywhere in this file.
@@ -66,7 +66,8 @@ function dbFixture() {
     },
     query(table) {
       const filters = [];
-      const selected = () => tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
+      const selected = () =>
+        tableRows(table).filter((row) => filters.every(([field, value]) => row[field] === value));
       const query = {
         withIndex(_name, build) {
           const index = {
@@ -108,8 +109,8 @@ function dbFixture() {
   return { ctx, db, tableRows };
 }
 
-test("render provider defaults to disabled with no env", () => {
-  assert.equal(renderProvider({}), "disabled");
+test("render provider defaults to openai with no env", () => {
+  assert.equal(renderProvider({}), "openai");
 });
 
 test("RENDER_PROVIDER=openai resolves explicitly", () => {
@@ -135,7 +136,7 @@ test("dispatch invokes the openai runner exactly once and passes everything thro
     },
   };
   const input = request();
-  const result = await renderOutfitImage(input, runners, { RENDER_PROVIDER: "openai" });
+  const result = await renderOutfitImage(input, runners, {});
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], input);
   assert.equal(result.provider, "openai");
@@ -151,10 +152,7 @@ test("a runner failure propagates unchanged and never calls another provider", a
       throw sentinel;
     },
   };
-  await assert.rejects(
-    () => renderOutfitImage(request(), runners, { RENDER_PROVIDER: "openai" }),
-    (error) => error === sentinel,
-  );
+  await assert.rejects(() => renderOutfitImage(request(), runners, {}), (error) => error === sentinel);
 });
 
 test("markRenderDone with OpenAI usage records usage and token-derived COGS", async () => {
@@ -193,8 +191,9 @@ test("markRenderDone with usage absent and a positive explicit cost records it v
 
 test("markRenderDone with usage absent and costUsd absent fails closed", async () => {
   const f = dbFixture();
-  await assert.rejects(markRenderDone(f.ctx, "render1", { storageId: "blob" }), (error) =>
-    /usage or an explicit costUsd/.test(error.message),
+  await assert.rejects(
+    markRenderDone(f.ctx, "render1", { storageId: "blob" }),
+    (error) => /usage or an explicit costUsd/.test(error.message),
   );
   const render = await f.db.get("render1");
   assert.equal(render.status, "pending", "the invalid case must not mark the render done");

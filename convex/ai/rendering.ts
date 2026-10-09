@@ -2,14 +2,12 @@
 
 import { appError } from "../lib/errors";
 import { type RenderQuality, type TokenUsage } from "../shared/credits";
-import { RENDER_UNAVAILABLE_REASON } from "../shared/render_policy";
 
 /**
  * The render provider seam. `renderImage` (in `ai/openai.ts`) builds a RenderRequest from the
  * render context and dispatches on the server-only `RENDER_PROVIDER` env:
  *
- * - "disabled" (default): fail closed without calling a provider.
- * - "openai": gpt-image-2 edit, only when explicitly configured.
+ * - "openai" (default, and currently the only implemented runner): gpt-image-2 edit.
  *
  * No automatic failover between providers: the configured provider is the provider, and a provider
  * failure settles the render like any render failure (the workflow retries transient errors and
@@ -17,16 +15,15 @@ import { RENDER_UNAVAILABLE_REASON } from "../shared/render_policy";
  * injectable (runners, env) so tests exercise it without a network.
  */
 
-export const RENDER_PROVIDERS = ["disabled", "openai"] as const;
+export const RENDER_PROVIDERS = ["openai"] as const;
 export type RenderProviderId = (typeof RENDER_PROVIDERS)[number];
 
 /** Which provider renders this image. Reads per call so tests can flip it without a stale cache. */
 export function renderProvider(env: Record<string, string | undefined> = process.env): RenderProviderId {
   const provider = env.RENDER_PROVIDER;
-  if (provider === undefined) return "disabled";
+  if (provider === undefined) return "openai";
   if (provider === "openai") return provider;
-  if (provider === "disabled") return provider;
-  throw appError("INVALID_INPUT", `RENDER_PROVIDER "${provider}" is not supported; use "disabled" or "openai".`);
+  throw appError("INVALID_INPUT", `RENDER_PROVIDER "${provider}" is not supported; use "openai".`);
 }
 
 export type RenderRequest = {
@@ -67,7 +64,6 @@ export async function renderOutfitImage(
   env: Record<string, string | undefined> = process.env,
 ): Promise<RenderResult> {
   const provider = renderProvider(env);
-  if (provider === "disabled") throw appError("FEATURE_LOCKED", RENDER_UNAVAILABLE_REASON);
   const result = await runners.openai(request);
   return { ...result, provider };
 }
