@@ -58,13 +58,14 @@ export function draftFromOutfit(outfit: Outfit): OutfitDraft {
 type OutfitFormProps = {
   initial: OutfitDraft;
   compact?: boolean;
+  tryOnAvailable?: boolean;
   /** Lets the screen around the form warn before throwing unsaved work away. */
   onDirtyChange?: (dirty: boolean) => void;
 } & ({ mode: "create" } | { mode: "edit"; outfitId: Id<"outfits">; onTryOn?: () => void });
 
 /** The slot board plus name/occasion. Owns the draft; saving is create-then-redirect or patch-in-place. */
 export function OutfitForm(props: OutfitFormProps) {
-  const { initial, onDirtyChange, compact = false } = props;
+  const { initial, onDirtyChange, compact = false, tryOnAvailable = false } = props;
   const router = useRouter();
   const pathname = usePathname();
   const { setContextOverride } = useStylistPanel();
@@ -402,8 +403,12 @@ export function OutfitForm(props: OutfitFormProps) {
                   : dirty
                     ? props.mode === "edit"
                       ? "Save your changes before trying on this outfit."
-                      : "Save this look, then see it on you."
-                    : "Saved. Ready for the fitting room."}
+                      : tryOnAvailable
+                        ? "Save this look, then see it on you."
+                        : "Save this look to your outfits."
+                    : tryOnAvailable
+                      ? "Saved. Ready for the fitting room."
+                      : "Saved."}
             </p>
             {!compact || dirty || props.mode === "create" ? (
               <Button
