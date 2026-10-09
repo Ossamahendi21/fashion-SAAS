@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useOutfit, useOutfitActions, type Outfit } from "@/hooks/use-outfits";
 import { formatRelative, pluralize } from "@/lib/format";
 import { routes } from "@/lib/routes";
+import { useRenderAvailability } from "@/hooks/use-renders";
 import type { Id } from "@convex/_generated/dataModel";
 
 type OutfitBuilderProps = { mode: "create" } | { mode: "edit"; outfitId: string };
@@ -100,11 +101,13 @@ function EditBuilder({ outfitId }: { outfitId: string }) {
 }
 
 function SavedOutfitBuilder({ outfit }: { outfit: Outfit }) {
+  const renderAvailability = useRenderAvailability();
   const [dirty, setDirty] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [startedJobId, setStartedJobId] = useState<Id<"jobs"> | null>(null);
   const hasPieces = Object.values(outfit.items).some((item) => (Array.isArray(item) ? item.length > 0 : Boolean(item)));
-  const canTryOn = !dirty && hasPieces;
+  const renderingEnabled = renderAvailability?.enabled === true;
+  const canTryOn = renderingEnabled && !dirty && hasPieces;
 
   function openFittingRoom() {
     if (canTryOn) setSheetOpen(true);
@@ -118,29 +121,36 @@ function SavedOutfitBuilder({ outfit }: { outfit: Outfit }) {
         description={describe(outfit)}
         actions={
           <>
-            <Button
-              className="h-11 rounded-none px-3 sm:hidden"
-              disabled={!canTryOn}
-              aria-label="Try on outfit"
-              aria-describedby="outfit-save-status"
-              onClick={openFittingRoom}
-            >
-              Try on <ArrowUpRight data-icon="inline-end" />
-            </Button>
+            {renderingEnabled ? (
+              <Button
+                className="h-11 rounded-none px-3 sm:hidden"
+                disabled={!canTryOn}
+                aria-label="Try on outfit"
+                aria-describedby="outfit-save-status"
+                onClick={openFittingRoom}
+              >
+                Try on <ArrowUpRight data-icon="inline-end" />
+              </Button>
+            ) : null}
             <OutfitActionsRow outfit={outfit} />
           </>
         }
       />
       <div className="@container">
         <div className="grid items-start gap-7 @2xl:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)] @4xl:gap-10">
-          <RenderPanel outfit={outfit} draftDirty={dirty} startedJobId={startedJobId} />
+          <RenderPanel
+            outfit={outfit}
+            draftDirty={dirty}
+            startedJobId={startedJobId}
+            renderingEnabled={renderingEnabled}
+          />
           <OutfitForm
             mode="edit"
             compact
             outfitId={outfit._id}
             initial={draftFromOutfit(outfit)}
             onDirtyChange={setDirty}
-            onTryOn={openFittingRoom}
+            onTryOn={renderingEnabled ? openFittingRoom : undefined}
           />
         </div>
       </div>

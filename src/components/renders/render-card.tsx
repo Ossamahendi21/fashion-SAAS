@@ -33,7 +33,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useJob, type JobView } from "@/hooks/use-active-jobs";
 import { useClerkPlan } from "@/hooks/use-clerk-plan";
-import { useElapsed, useRenderActions, useRenderDownload, type Render } from "@/hooks/use-renders";
+import {
+  useElapsed,
+  useRenderActions,
+  useRenderAvailability,
+  useRenderDownload,
+  type Render,
+} from "@/hooks/use-renders";
 import { formatCredits, formatDuration, formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { api } from "@convex/_generated/api";
@@ -54,6 +60,7 @@ type RenderCardProps = {
  */
 export function RenderCard({ render, showOutfit = false, regenerateDisabled = false, className }: RenderCardProps) {
   const { canShare } = useClerkPlan();
+  const renderAvailability = useRenderAvailability();
   const actions = useRenderActions();
   const { download, pendingRenderId } = useRenderDownload();
   const removeRender = useMutation(api.renders.remove);
@@ -69,6 +76,7 @@ export function RenderCard({ render, showOutfit = false, regenerateDisabled = fa
 
   const regenerateCost = CREDIT_COSTS.render[render.quality];
   const downloading = pendingRenderId === render._id;
+  const renderUnavailable = renderAvailability?.enabled !== true;
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -105,6 +113,7 @@ export function RenderCard({ render, showOutfit = false, regenerateDisabled = fa
             dismissing={dismissing}
             settling={settling}
             regenerateDisabled={regenerateDisabled}
+            renderUnavailable={renderUnavailable}
             onRetry={() => void run(() => actions.regenerate(render._id))}
             onDismiss={() => void dismiss()}
           />
@@ -188,11 +197,15 @@ export function RenderCard({ render, showOutfit = false, regenerateDisabled = fa
 
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  disabled={regenerateDisabled}
+                  disabled={regenerateDisabled || renderUnavailable}
                   onClick={() => void run(() => actions.regenerate(render._id))}
                 >
                   <RefreshCw />
-                  {regenerateDisabled ? "Save outfit edits first" : "Regenerate"}
+                  {renderUnavailable
+                    ? "Try-on unavailable"
+                    : regenerateDisabled
+                      ? "Save outfit edits first"
+                      : "Regenerate"}
                   <span className="ml-auto text-xs text-muted-foreground tabular-nums">
                     {formatCredits(regenerateCost)}
                   </span>
@@ -288,6 +301,7 @@ function FailedTile({
   dismissing,
   settling,
   regenerateDisabled,
+  renderUnavailable,
   onRetry,
   onDismiss,
 }: {
@@ -296,29 +310,32 @@ function FailedTile({
   dismissing: boolean;
   settling: boolean;
   regenerateDisabled: boolean;
+  renderUnavailable: boolean;
   onRetry: () => void;
   onDismiss: () => void;
 }) {
   return (
     <div className="flex aspect-[2/3] flex-col items-center justify-center gap-2 border border-destructive/30 bg-destructive/5 p-3 text-center">
       <AlertCircle className="size-5 text-destructive" aria-hidden />
-      <p className="line-clamp-3 text-xs text-destructive">{error ?? "This render failed."}</p>
+      <p className="line-clamp-3 text-xs text-destructive">{error ?? "This try-on could not be completed."}</p>
       {settling ? (
         <p className="text-xs text-muted-foreground" role="status">
           Finishing this request…
         </p>
       ) : null}
       <div className="mt-1 flex flex-wrap justify-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="min-h-11"
-          onClick={onRetry}
-          disabled={busy || dismissing || settling || regenerateDisabled}
-        >
-          {busy ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
-          {regenerateDisabled ? "Save outfit edits first" : "Retry"}
-        </Button>
+        {!regenerateDisabled && !renderUnavailable ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-11"
+            onClick={onRetry}
+            disabled={busy || dismissing || settling}
+          >
+            {busy ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
+            Retry
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"

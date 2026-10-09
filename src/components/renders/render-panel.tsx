@@ -20,10 +20,12 @@ export function RenderPanel({
   outfit,
   draftDirty = false,
   startedJobId = null,
+  renderingEnabled = false,
 }: {
   outfit: Outfit;
   draftDirty?: boolean;
   startedJobId?: Id<"jobs"> | null;
+  renderingEnabled?: boolean;
 }) {
   const renders = useRendersForOutfit(outfit._id);
   const pendingJobId = renders?.find((render) => render.status === "pending")?.jobId ?? null;
@@ -89,7 +91,12 @@ export function RenderPanel({
       {renders === undefined ? (
         <Skeleton className="mx-auto aspect-[2/3] w-full max-w-[min(340px,36svh)] rounded-none" />
       ) : renders.length > 0 ? (
-        <TryOnViewer key={outfit._id} renders={renders} regenerateDisabled={draftDirty} />
+        <TryOnViewer
+          key={outfit._id}
+          renders={renders}
+          regenerateDisabled={draftDirty}
+          renderingEnabled={renderingEnabled}
+        />
       ) : (
         <div className="space-y-3 border-b border-foreground/15 py-10">
           <h3 className="max-w-sm text-3xl leading-tight font-medium tracking-[-0.05em]">
@@ -98,7 +105,9 @@ export function RenderPanel({
             On you.
           </h3>
           <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-            Choose Try on outfit to create a full-length preview. Your pieces and fit settings are ready.
+            {renderingEnabled
+              ? "Choose Try on outfit to create a full-length preview. Your pieces and fit settings are ready."
+              : "Virtual try-on is not available in this beta yet. Your saved outfit is ready when the fitting room opens."}
           </p>
         </div>
       )}
@@ -111,7 +120,15 @@ export function RenderPanel({
   );
 }
 
-function TryOnViewer({ renders, regenerateDisabled }: { renders: Render[]; regenerateDisabled: boolean }) {
+function TryOnViewer({
+  renders,
+  regenerateDisabled,
+  renderingEnabled,
+}: {
+  renders: Render[];
+  regenerateDisabled: boolean;
+  renderingEnabled: boolean;
+}) {
   const [selectedId, setSelectedId] = useState(
     () => (renders.find((render) => render.status === "done") ?? renders[0])?._id,
   );
@@ -125,7 +142,7 @@ function TryOnViewer({ renders, regenerateDisabled }: { renders: Render[]; regen
         <RenderCard
           key={selected._id}
           render={selected}
-          regenerateDisabled={regenerateDisabled}
+          regenerateDisabled={regenerateDisabled || !renderingEnabled}
           className="w-full max-w-[min(340px,36svh)]"
         />
       </div>

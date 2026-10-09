@@ -15,6 +15,7 @@ export type RenderDetail = NonNullable<FunctionReturnType<typeof api.renders.get
 export type Avatar = FunctionReturnType<typeof api.avatars.list>[number];
 export type StartRendersArgs = FunctionArgs<typeof api.renders.start>;
 export type StartRendersResult = FunctionReturnType<typeof api.renders.start>;
+export type RenderAvailability = FunctionReturnType<typeof api.renders.availability>;
 
 export const RENDERS_PAGE_SIZE = NAVIGATION_PAGE_SIZE;
 
@@ -32,6 +33,11 @@ export function useLookbookRenders(outfitId: Id<"outfits"> | null) {
 
 export function useRendersForOutfit(outfitId: Id<"outfits"> | null | undefined): Render[] | undefined {
   return useQuery(api.renders.listByOutfit, outfitId ? { outfitId } : "skip");
+}
+
+export function useRenderAvailability(): RenderAvailability | undefined {
+  const { isAuthenticated } = useConvexAuth();
+  return useQuery(api.renders.availability, isAuthenticated ? {} : "skip");
 }
 
 /** Render plus the outfit it came from — used by the lightbox so the collage needs no second query. */
