@@ -2,35 +2,33 @@
 
 import { appError } from "../lib/errors";
 import { type RenderQuality, type TokenUsage } from "../shared/credits";
+import type { Slot } from "../shared/wardrobe";
 
 /**
  * The render provider seam. `renderImage` (in `ai/openai.ts`) builds a RenderRequest from the
- * render context and dispatches on the server-only `RENDER_PROVIDER` env:
+ * render context and dispatches to the local composer:
  *
- * - "openai" (default, and currently the only implemented runner): gpt-image-2 edit.
+ * - "composite": deterministic local composition with sharp, at $0 external cost.
  *
- * No automatic failover between providers: the configured provider is the provider, and a provider
- * failure settles the render like any render failure (the workflow retries transient errors and
- * refunds failures; it never calls another provider). All dispatch logic here is plain and
- * injectable (runners, env) so tests exercise it without a network.
+ * There is no paid-provider fallback. The dispatch logic is plain and injectable so tests exercise
+ * it without a network.
  */
 
-export const RENDER_PROVIDERS = ["openai"] as const;
+export const RENDER_PROVIDERS = ["composite"] as const;
 export type RenderProviderId = (typeof RENDER_PROVIDERS)[number];
 
 /** Which provider renders this image. Reads per call so tests can flip it without a stale cache. */
 export function renderProvider(env: Record<string, string | undefined> = process.env): RenderProviderId {
   const provider = env.RENDER_PROVIDER;
-  if (provider === undefined) return "openai";
-  if (provider === "openai") return provider;
-  throw appError("INVALID_INPUT", `RENDER_PROVIDER "${provider}" is not supported; use "openai".`);
+  if (provider === undefined || provider === "composite") return "composite";
+  throw appError("INVALID_INPUT", `RENDER_PROVIDER "${provider}" is not supported; use "composite".`);
 }
 
 export type RenderRequest = {
   /** Normalized avatar PNG with its reference name ("person"). */
   person: { bytes: Uint8Array; name: string };
   /** Ordered normalized garment cutouts (inner layer first) with their reference names. */
-  garments: Array<{ bytes: Uint8Array; name: string }>;
+  garments: Array<{ bytes: Uint8Array; name: string; slot: Slot }>;
   /** The full try-on instruction for the outfit. */
   prompt: string;
   /** Billing quality; each runner maps it to its own output settings. */
@@ -49,14 +47,13 @@ export type RenderResult = RenderRunnerResult & {
   provider: RenderProviderId;
 };
 
-/** The provider implementations, owned by `ai/openai.ts` so tests can stub the seam. */
+/** The local composer implementation, injected so tests can stub the seam. */
 export type RenderRunners = {
-  openai: (request: RenderRequest) => Promise<RenderRunnerResult>;
+  composite: (request: RenderRequest) => Promise<RenderRunnerResult>;
 };
 
 /**
- * The dispatch. The configured provider runs exactly once; any failure propagates to the
- * caller (the workflow retries transient errors and refunds failures) without failover.
+ * The local composer runs exactly once; any failure propagates to the caller.
  */
 export async function renderOutfitImage(
   request: RenderRequest,
@@ -64,6 +61,6 @@ export async function renderOutfitImage(
   env: Record<string, string | undefined> = process.env,
 ): Promise<RenderResult> {
   const provider = renderProvider(env);
-  const result = await runners.openai(request);
+  const result = await runners.composite(request);
   return { ...result, provider };
 }

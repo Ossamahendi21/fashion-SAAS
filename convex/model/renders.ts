@@ -30,6 +30,11 @@ import { bumpDailyStats } from "./stats";
 
 type Ctx = QueryCtx | MutationCtx;
 
+/** Backend failures can contain provider/configuration details; UI views must never expose them. */
+export function renderFailureMessage(error: string | undefined): string | undefined {
+  return error ? "This try-on couldn't be completed. Please try again." : undefined;
+}
+
 export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?: string): Promise<RenderView> {
   const name = outfitName ?? (await ctx.db.get(render.outfitId))?.name ?? "Outfit";
   return {
@@ -43,7 +48,8 @@ export async function toRenderView(ctx: Ctx, render: Doc<"renders">, outfitName?
     url: render.storageId ? await ctx.storage.getUrl(render.storageId) : null,
     creditsCharged: render.creditsCharged,
     shareToken: render.shareToken,
-    error: render.error,
+    // Provider/configuration details stay in backend job records for operators, never in the UI.
+    error: renderFailureMessage(render.error),
     createdAt: render.createdAt,
     completedAt: render.completedAt,
   };
