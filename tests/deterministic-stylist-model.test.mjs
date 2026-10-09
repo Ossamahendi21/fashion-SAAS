@@ -7,6 +7,7 @@ import {
   DETERMINISTIC_STYLIST_PROVIDER,
   STYLIST_TURN_TOOL_NAME,
   createDeterministicStylistModel,
+  nextStylistToolCallId,
   planStylistModelStep,
 } from "../agent/lib/deterministic-stylist-model.ts";
 import { createDeterministicStylistCanary } from "../agent/lib/deterministic-stylist-canary.ts";
@@ -335,4 +336,88 @@ test("state accumulates across turns through the deterministic pipeline", async 
   assert.equal(calls.quote.length, 1);
   assert.deepEqual(calls.quote.at(-1).outfitIds, ["outfit-1"]);
   assert.equal(calls.start.length, 0);
+});
+
+// --- unique tool-call ids per turn ------------------------------------------------------------
+// Eve keys dynamic-tool parts (and their approvals) by toolCallId across the whole session: a
+// fixed id makes every later turn's result attach to the FIRST turn's part, so those turns read
+// as perpetually resultless. Ids are derived deterministically from the prompt instead.
+
+const assistantCall = (toolCallId, toolName = STYLIST_TURN_TOOL_NAME) => ({
+  role: "assistant",
+  content: [{ type: "tool-call", toolCallId, toolName, input: "{}" }],
+});
+
+test("the first turn keeps the historical bare tool-call id", () => {
+  assert.equal(nextStylistToolCallId([user("give me two casual outfits")]), "call_stylist_turn");
+  const step = planStylistModelStep([user("give me two casual outfits")]);
+  assert.equal(step.type, "tool-call");
+  assert.equal(step.toolCallId, "call_stylist_turn");
+});
+
+test("later turns derive unique suffixed ids from prior stylist calls", () => {
+  const first = [user("give me two casual outfits")];
+  const second = [...first, assistantCall("call_stylist_turn"), user("make it warmer")];
+  assert.equal(nextStylistToolCallId(second), "call_stylist_turn_2");
+  const third = [...second, assistantCall("call_stylist_turn_2"), user("render that")];
+  assert.equal(nextStylistToolCallId(third), "call_stylist_turn_3");
+  const step = planStylistModelStep(third);
+  assert.equal(step.type, "tool-call");
+  assert.equal(step.toolCallId, "call_stylist_turn_3");
+});
+
+test("other tools and result parts never shift the stylist call counter", () => {
+  const prompt = [
+    user("hello"),
+    assistantCall("call_other", "get_wardrobe"),
+    toolResult({ somethingElse: true }),
+    user("give me two casual outfits"),
+  ];
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn");
+});
+
+test("id derivation is deterministic for the same prompt", () => {
+  const prompt = [user("a"), assistantCall("call_stylist_turn"), user("b")];
+  assert.equal(nextStylistToolCallId(prompt), nextStylistToolCallId(prompt));
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
+});
+
+test("six consecutive turns yield six distinct stable ids", () => {
+  const ids = [];
+  let prompt = [user("turn one")];
+  for (let turn = 0; turn < 6; turn += 1) {
+    const id = nextStylistToolCallId(prompt);
+    ids.push(id);
+    prompt = [...prompt, assistantCall(id), user(`turn ${turn + 2}`)];
+  }
+  assert.deepEqual(ids, [
+    "call_stylist_turn",
+    "call_stylist_turn_2",
+    "call_stylist_turn_3",
+    "call_stylist_turn_4",
+    "call_stylist_turn_5",
+    "call_stylist_turn_6",
+  ]);
+  assert.equal(new Set(ids).size, 6, "every turn binds results and approvals to its own identity");
+});
+
+test("a failed turn still consumes its call id so the next turn cannot collide", () => {
+  const prompt = [
+    user("render that"),
+    assistantCall("call_stylist_turn"),
+    toolResult({ kind: "readFailed" }),
+    user("render that"),
+  ];
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
+});
+
+test("reconstructed history with interleaved content counts identically", () => {
+  const prompt = [
+    user("a"),
+    assistantCall("call_stylist_turn"),
+    toolResult({ kind: "recommendation" }),
+    { role: "assistant", content: [{ type: "text", text: "Here are 2 looks." }] },
+    user("b"),
+  ];
+  assert.equal(nextStylistToolCallId(prompt), "call_stylist_turn_2");
 });

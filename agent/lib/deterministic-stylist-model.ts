@@ -61,10 +61,38 @@ export function planStylistModelStep(prompt: LanguageModelV4Prompt): StylistMode
   const parse = parseStylistText(text);
   return {
     type: "tool-call",
-    toolCallId: `call_${STYLIST_TURN_TOOL_NAME}`,
+    toolCallId: nextStylistToolCallId(prompt),
     toolName: STYLIST_TURN_TOOL_NAME,
     input: { turn: parse.turn },
   };
+}
+
+/**
+ * Step 7 Phase C10B — unique tool-call ids per turn.
+ *
+ * Eve keys dynamic-tool parts (and their approval requests) by toolCallId across the whole
+ * session. A fixed id makes every later turn's result attach to the FIRST turn's part, so those
+ * turns read as perpetually resultless in any client. The id stays fully deterministic: the
+ * count of prior `stylist_turn` calls already in the prompt, keeping the historical bare id for
+ * the first turn so existing single-turn behavior and captures are unchanged.
+ */
+export function nextStylistToolCallId(prompt: LanguageModelV4Prompt): string {
+  let prior = 0;
+  for (const message of prompt) {
+    const content: unknown = (message as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (
+        typeof part === "object" &&
+        part !== null &&
+        (part as { type?: unknown }).type === "tool-call" &&
+        (part as { toolName?: unknown }).toolName === STYLIST_TURN_TOOL_NAME
+      ) {
+        prior += 1;
+      }
+    }
+  }
+  return prior === 0 ? `call_${STYLIST_TURN_TOOL_NAME}` : `call_${STYLIST_TURN_TOOL_NAME}_${prior + 1}`;
 }
 
 /** The latest authored user-message text, or `null` when the prompt carries no user text. */
