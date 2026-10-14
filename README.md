@@ -13,8 +13,7 @@
 
 Fitcheck brings together **image understanding, garment extraction, virtual try-ons, a contextual AI agent, realtime background jobs, authentication, subscriptions and a credit ledger** in one full-stack application.
 
-[**Open the demo →**](https://fitcheck-eight-black.vercel.app) · [**Get started with Clerk →**](https://go.clerk.com/sonny) · [**Join the free AI Community →**](https://www.papareact.com/ztoh-form)
-
+[**Open the demo →**](https://fitcheck-eight-black.vercel.app) .
 ![Fitcheck landing page](docs/assets/landing-desktop.jpg)
 
 > **Who is this for?** Developers who want to build an AI product that does more than return a chat message. Follow an uploaded photo through detection, user confirmation, credit reservation, image generation, storage and a live interface. Then connect an agent to those same authenticated operations.
@@ -832,4 +831,4 @@ Use photos you own or have permission to process. Personal photos, garment refer
 
 Keep environment files, service credentials and private QA material out of published repositories. The README screenshots have their own [capture notes](docs/assets/README.md).
 
-Built by [Sonny Sangha](https://github.com/sonnysangha). **[Get started with Clerk →](https://go.clerk.com/sonny)** · **[Join the free AI Community →](https://www.papareact.com/ztoh-form)**
+Built by [Oussama Hendi](https://github.com/Ossamahendi21). 
