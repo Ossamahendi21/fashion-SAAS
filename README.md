@@ -27,7 +27,7 @@ Fitcheck brings together **image understanding, garment extraction, virtual try-
 
 ## 👇🏼 DO THIS Before You Get Started
 
-1️⃣ Sign up to Clerk 👉 **[https://clerk.com](clerk.com)**
+1️⃣ Sign up to Clerk 👉 **[https://www.clerk.com](https://www.clerk.com)**
 
 2️⃣ Create your Convex account 👉 **[https://www.convex.dev/](https://www.convex.dev/)**
 
